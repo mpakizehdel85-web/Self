@@ -23,6 +23,7 @@ PHONE = os.environ["TELEGRAM_PHONE"]
 PASSWORD_2FA = os.environ.get("TELEGRAM_2FA_PASSWORD", "")
 
 SESSION_DIR = Path(".telegram_sessions")
+SESSION_DIR.mkdir(parents=True, exist_ok=True)
 SESSION_PATH = SESSION_DIR / "userbot"
 
 PORT = int(os.environ.get("PORT", "8000"))
@@ -312,10 +313,6 @@ async def authenticate():
 
     await client.connect()
 
-    # IMPORTANT:
-    # We DO NOT delete the session.
-    # If it is still valid, no code will be requested.
-
     if await client.is_user_authorized():
 
         set_login_state(
@@ -397,7 +394,6 @@ def parse_interval(value):
 
     value = value.strip().lower()
 
-    # 5s / 5m / 5h
     match = re.fullmatch(
         r"(\d+(?:\.\d+)?)(s|m|h)",
         value
@@ -420,7 +416,6 @@ def parse_interval(value):
         if unit == "h":
             return number * 3600
 
-    # Plain number = minutes
     if re.fullmatch(
         r"\d+(?:\.\d+)?",
         value
@@ -488,9 +483,6 @@ async def set_scheduled_messages(event):
         )
 
         return
-
-    # Telegram scheduled messages need future datetimes.
-    # Every message receives its own schedule time.
 
     now = datetime.now(
         timezone.utc
@@ -606,7 +598,6 @@ async def automatic_reply(event):
     if event.out:
         return
 
-    # اگر پیام دریافتی خودش ریپلای روی پیام دیگری باشد، نادیده گرفته می‌شود
     if event.reply_to_msg_id:
         return
 
