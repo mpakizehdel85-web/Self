@@ -13,7 +13,6 @@ from urllib.parse import parse_qs
 from telethon import TelegramClient, events
 from telethon.errors import SessionPasswordNeededError
 
-
 # ============================================================
 # SETTINGS
 # ============================================================
@@ -22,6 +21,9 @@ API_ID = int(os.environ["TELEGRAM_API_ID"])
 API_HASH = os.environ["TELEGRAM_API_HASH"]
 PHONE = os.environ["TELEGRAM_PHONE"]
 PASSWORD_2FA = os.environ.get("TELEGRAM_2FA_PASSWORD", "")
+
+
+", "
 
 # تنظیم مسیر سشن (سازگار با دیسک دائمی رندر یا مسیر محلی)
 SESSION_DIR = Path(".telegram_sessions")
