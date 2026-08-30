@@ -1,6 +1,7 @@
 import asyncio
 import os
 import re
+import threading
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -123,7 +124,6 @@ def start_web_server():
     server = ThreadingHTTPServer(("0.0.0.0", PORT), WebHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
-# دستورات بات
 def register_events(cli):
     @cli.on(events.NewMessage(outgoing=True, pattern=r"^\.ping$"))
     async def ping(event):
