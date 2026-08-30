@@ -20,7 +20,7 @@ from telethon.sessions import StringSession
 SESSION_PATH = Path("userbot")
 PORT = int(os.environ.get("PORT", "8000"))
 
-# خوا# خواندن اطلاعات از متغیرهای محیطی رندر (Environment)
+# خواندن ایمن اطلاعات از متغیرهای محیطی رندر
 _raw_api_id = os.environ.get("API_ID", "0").strip()
 API_ID = int(_raw_api_id) if _raw_api_id.isdigit() else 0
 API_HASH = os.environ.get("API_HASH", "").strip()
@@ -198,11 +198,13 @@ async def authenticate():
     global client
 
     env_session_string = os.environ.get("SESSION_STRING", "")
+    safe_api_id = API_ID if API_ID != 0 else 123456
+    safe_api_hash = API_HASH if API_HASH else "placeholder"
 
     if env_session_string:
-        client = TelegramClient(StringSession(env_session_string), API_ID, API_HASH, auto_reconnect=True)
+        client = TelegramClient(StringSession(env_session_string), safe_api_id, safe_api_hash, auto_reconnect=True)
     else:
-        client = TelegramClient(str(SESSION_PATH), API_ID, API_HASH, auto_reconnect=True)
+        client = TelegramClient(str(SESSION_PATH), safe_api_id, safe_api_hash, auto_reconnect=True)
 
     register_events(client)
     await client.connect()
