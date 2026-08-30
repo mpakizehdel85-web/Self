@@ -1,224 +1,22 @@
 import asyncio
-import html
 import os
 import re
-import threading
 from datetime import datetime, timedelta, timezone
-from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs
-
 from telethon import TelegramClient, events
 from telethon.errors import SessionPasswordNeededError
 from telethon.sessions import StringSession
 
 SESSION_PATH = Path("userbot")
-PORT = int(os.environ.get("PORT", "8000"))
 
-client = None
-MAIN_LOOP = None
+API_ID = int(os.environ.get("API_ID", "0").strip() or 0)
+API_HASH = os.environ.get("API_HASH", "").strip()
+PHONE = os.environ.get("PHONE", "").strip()
+SESSION_STRING = os.environ.get("SESSION_STRING", "").strip()
+PASSWORD_2FA = os.environ.get("PASSWORD_2FA", "").strip()
 
-auth_step = "form"
-form_data = {}
-code_event = asyncio.Event()
-password_event = asyncio.Event()
-login_message = "لطفاً اطلاعات اکانت تلگرام خود را وارد کنید."
-
-
-def set_step(step, msg):
-    global auth_step, login_message
-    auth_step = step
-    login_message = msg
-    print(f"[AUTH STEP] {step}: {msg}")
-
-
-def page_template(content):
-    return f"""<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Telegram Userbot Setup</title>
-<style>
-body {{
-    margin:0; min-height:100vh; display:grid; place-items:center;
-    background:#10131a; color:#fff; font-family:system-ui,sans-serif;
-}}
-main {{
-    width:min(92vw,400px); padding:28px; box-sizing:border-box;
-    border-radius:16px; background:#191e28; border:1px solid #303746;
-}}
-input {{
-    width:100%; box-sizing:border-box; padding:12px;
-    margin-top:8px; margin-bottom:14px; border-radius:9px;
-    border:1px solid #465064; background:#0d1117; color:#fff; font-size:16px;
-}}
-label {{ font-size:14px; color:#b8c0cf; }}
-button {{
-    width:100%; margin-top:10px; padding:12px; border:0;
-    border-radius:9px; background:#4f8cff; color:white;
-    font-size:16px; font-weight:700; cursor:pointer;
-}}
-p {{ color:#b8c0cf; line-height:1.5; }}
-</style>
-</head>
-<body>
-<main>{content}</main>
-</body>
-</html>"""
-
-
-def render_page():
-    if auth_step == "form":
-        return page_template("""
-<h2>Telegram Credentials</h2>
-<p>اطلاعات اکانت تلگرام خود را وارد کنید.</p>
-<form method="post" action="/submit">
-<label>API ID</label>
-<input name="api_id" type="text" required>
-<label>API Hash</label>
-<input name="api_hash" type="text" required>
-<label>Phone Number (with +)</label>
-<input name="phone" type="text" placeholder="+989..." required>
-<label>2FA Password (optional)</label>
-<input name="password" type="password">
-<button type="submit">ذخیره و ادامه</button>
-</form>
-""")
-
-    if auth_step == "code":
-        return page_template("""
-<h2>Telegram Login Code</h2>
-<p>کد تایید ارسال‌شده از تلگرام را وارد کنید:</p>
-<form method="post" action="/code">
-<label>Login Code</label>
-<input name="code" type="text" inputmode="numeric" required>
-<button type="submit">تایید کد</button>
-</form>
-""")
-
-    if auth_step == "password":
-        return page_template("""
-<h2>Two-Step Verification</h2>
-<p>رمز عبور دو مرحله‌ای (2FA) خود را وارد کنید:</p>
-<form method="post" action="/password">
-<label>2FA Password</label>
-<input name="password" type="password" required>
-<button type="submit">تایید رمز</button>
-</form>
-""")
-
-    if auth_step == "done":
-        return page_template("""
-<h2>✅ متصل شد</h2>
-<p>یوزربات با موفقیت به تلگرام متصل گردید و آماده به کار است.</p>
-""")
-
-    return page_template(f"""
-<h2>Status</h2>
-<p>{html.escape(login_message)}</p>
-<meta http-equiv="refresh" content="3">
-""")
-
-
-class WebHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path != "/":
-            self.send_error(HTTPStatus.NOT_FOUND)
-            return
-        body = render_page().encode("utf-8")
-        self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def do_POST(self):
-        global form_data
-        length = int(self.headers.get("Content-Length", "0"))
-        body = self.rfile.read(length).decode("utf-8")
-        values = parse_qs(body, keep_blank_values=True)
-
-        if self.path == "/submit":
-            form_data["api_id"] = values.get("api_id", [""])[0].strip()
-            form_data["api_hash"] = values.get("api_hash", [""])[0].strip()
-            form_data["phone"] = values.get("phone", [""])[0].strip()
-            form_data["password"] = values.get("password", [""])[0].strip()
-            set_step("processing", "در حال ارتباط با تلگرام...")
-            if MAIN_LOOP:
-                MAIN_LOOP.call_soon_threadsafe(code_event.set)
-
-        elif self.path == "/code":
-            form_data["code"] = values.get("code", [""])[0].strip()
-            set_step("processing", "در حال بررسی کد تایید...")
-            if MAIN_LOOP:
-                MAIN_LOOP.call_soon_threadsafe(code_event.set)
-
-        elif self.path == "/password":
-            form_data["password_entered"] = values.get("password", [""])[0].strip()
-            set_step("processing", "در حال بررسی رمز عبور...")
-            if MAIN_LOOP:
-                MAIN_LOOP.call_soon_threadsafe(password_event.set)
-
-        self.send_response(HTTPStatus.SEE_OTHER)
-        self.send_header("Location", "/")
-        self.end_headers()
-
-    def log_message(self, format, *args):
-        return
-
-
-def start_web_server():
-    server = ThreadingHTTPServer(("0.0.0.0", PORT), WebHandler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    print(f"[WEB] Server running on port {PORT}")
-
-
-async def authenticate():
-    global client
-    await code_event.wait()
-    code_event.clear()
-
-    api_id = int(form_data["api_id"])
-    api_hash = form_data["api_hash"]
-    phone = form_data["phone"]
-    pass_2fa = form_data.get("password", "")
-
-    client = TelegramClient(str(SESSION_PATH), api_id, api_hash, auto_reconnect=True)
-    await client.connect()
-
-    if await client.is_user_authorized():
-        set_step("done", "سشن از قبل معتبر بود.")
-        return
-
-    await client.send_code_request(phone)
-    set_step("code", "کد تایید ارسال شد.")
-
-    code_event.clear()
-    await code_event.wait()
-    code = form_data["code"]
-
-    try:
-        await client.sign_in(phone=phone, code=code)
-    except SessionPasswordNeededError:
-        set_step("password", "نیازمند رمز دومرحله‌ای است.")
-        if pass_2fa:
-            password = pass_2fa
-        else:
-            password_event.clear()
-            await password_event.wait()
-            password = form_data["password_entered"]
-        await client.sign_in(password=password)
-
-    set_step("done", "ورود موفقیت‌آمیز بود.")
-    try:
-        print("======================================")
-        print("SESSION_STRING:", client.session.save())
-        print("======================================")
-    except:
-        pass
+if not API_ID or not API_HASH or not PHONE:
+    raise ValueError("❌ لطفاً متغیرهای API_ID، API_HASH و PHONE را در بخش Environment رندر تنظیم کنید.")
 
 
 # ============================================================
@@ -337,10 +135,6 @@ def register_events(cli):
         await check_cat_message(event.message)
 
 
-# ============================================================
-# .FISH AUTOMATION
-# ============================================================
-
 fish_tasks = {}
 
 def register_fish(cli):
@@ -356,10 +150,10 @@ def register_fish(cli):
         async def fish_worker():
             try:
                 while chat_id in fish_tasks:
-                    await client.send_message(chat_id, "ماهی")
+                    await cli.send_message(chat_id, "ماهی")
                     await asyncio.sleep(3)
                     
-                    async for message in client.iter_messages(chat_id, limit=2):
+                    async for message in cli.iter_messages(chat_id, limit=2):
                         if message.buttons:
                             for row in message.buttons:
                                 for btn in row:
@@ -368,10 +162,10 @@ def register_fish(cli):
                                         break
                     
                     await asyncio.sleep(4)
-                    await client.send_message(chat_id, "یخچال میویی")
+                    await cli.send_message(chat_id, "یخچال میویی")
                     await asyncio.sleep(4)
                     
-                    async for message in client.iter_messages(chat_id, limit=2):
+                    async for message in cli.iter_messages(chat_id, limit=2):
                         if message.buttons:
                             for row in message.buttons:
                                 for btn in row:
@@ -381,7 +175,7 @@ def register_fish(cli):
                                         await asyncio.sleep(1.5)
                     
                     await asyncio.sleep(2)
-                    async for message in client.iter_messages(chat_id, limit=2):
+                    async for message in cli.iter_messages(chat_id, limit=2):
                         if message.buttons:
                             for row in message.buttons:
                                 for btn in row:
@@ -423,21 +217,47 @@ def register_fish(cli):
 
 
 # ============================================================
-# MAIN
+# MAIN & TERMINAL LOGIN
 # ============================================================
 
 async def main():
-    global MAIN_LOOP
-    MAIN_LOOP = asyncio.get_running_loop()
-    start_web_server()
+    if SESSION_STRING:
+        client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH, auto_reconnect=True)
+    else:
+        client = TelegramClient(str(SESSION_PATH), API_ID, API_HASH, auto_reconnect=True)
 
-    print("Waiting for credentials via web page...")
-    await authenticate()
+    await client.connect()
+
+    if not await client.is_user_authorized():
+        print("======================================")
+        print("Sending login code to Telegram...")
+        print("======================================")
+        await client.send_code_request(PHONE)
+        
+        code = input(">>> Please enter the Telegram login code from your official app: ").strip()
+        try:
+            await client.sign_in(phone=PHONE, code=code)
+        except SessionPasswordNeededError:
+            if PASSWORD_2FA:
+                password = PASSWORD_2FA
+            else:
+                password = input(">>> Enter your 2FA Password: ").strip()
+            await client.sign_in(password=password)
+
+    print("======================================")
+    try:
+        print("✅ SUCCESS! Save this SESSION_STRING in Render Environment to never login again:")
+        print(client.session.save())
+    except:
+        pass
+    print("======================================")
 
     register_events(client)
     register_fish(client)
+
+    me = await client.get_me()
+    print(f"Logged in as: {me.first_name} (@{me.username or 'none'})")
     
-    print("Userbot running and all commands registered.")
     await client.run_until_disconnected()
 
 
