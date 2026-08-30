@@ -567,3 +567,39 @@ async def stop_fish_loop(event):
     else:
         await event.edit("⚠️ اتومیشن ماهی در این چت فعال نیست.")
 
+# ============================================================
+# .STATUS (Comprehensive Task Reporter)
+# ============================================================
+
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.status$"))
+async def check_all_bot_activities(event):
+    chat_id = event.chat_id
+    
+    status_lines = ["<b>🤖 گزارش جامع فعالیت‌های ربات:</b>\n"]
+    
+    # ۱. بررسی وضعیت اتومیشن ماهی (.fish)
+    if 'fish_tasks' in globals() and fish_tasks:
+        status_lines.append("<b>🐟 اتومیشن ماهی (.fish):</b>")
+        for cid in fish_tasks.keys():
+            status_lines.append(f"• در حال اجرا در چت: <code>{cid}</code>")
+    else:
+        status_lines.append("<b>🐟 اتومیشن ماهی (.fish):</b> هیچ تسک فعالی ندارد ❌")
+        
+    status_lines.append("")
+    
+    # ۲. بررسی کلی سایر متغیرها یا تسک‌های فعال در حافظه
+    active_globals = []
+    for var_name, var_value in globals().items():
+        if isinstance(var_value, dict) and var_value and var_name.endswith('_tasks') and var_name != 'fish_tasks':
+            active_globals.append(f"• <b>{var_name}:</b> {len(var_value)} مورد فعال")
+            
+    if active_globals:
+        status_lines.append("<b>⚙️ سایر تسک‌های فعال سیستم:</b>")
+        status_lines.extend(active_globals)
+    
+    status_lines.append("")
+    status_lines.append(f"<b>📍 مشخصات چت فعلی:</b> <code>{chat_id}</code>")
+    
+    # ویرایش پیام و ارسال گزارش نهایی
+    response_text = "\n".join(status_lines)
+    await event.edit(response_text, parse_mode='html')
