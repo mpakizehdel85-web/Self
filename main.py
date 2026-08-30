@@ -11,6 +11,7 @@ from urllib.parse import parse_qs
 
 from telethon import TelegramClient, events
 from telethon.errors import SessionPasswordNeededError
+from telethon.sessions import StringSession
 
 # ============================================================
 # SETTINGS & DYNAMIC CONFIG
@@ -244,7 +245,6 @@ def start_web_server():
 async def authenticate():
     global client, bot_config
 
-    # بررسی اینکه آیا قبلاً اطلاعات ذخیره شده است یا خیر
     if CONFIG_FILE.exists():
         import json
         try:
@@ -253,43 +253,88 @@ async def authenticate():
         except Exception:
             pass
 
-    # اگر اطلاعات کامل نبود، منتظر ماندن برای ورود از طریق فرم وب
-    while not bot_config.get("api_id") or not bot_config.get("api_hash") or not bot_config.get("phone"):
-        set_login_state("config", "لطفاً مشخصات را از طریق صفحه وب وارد کنید.")
-        print("[LOGIN] Waiting for credentials via web page...")
-        bot_config = await config_queue.get()
-        import json
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(bot_config, f)
+    # بررسی StringSession از متغیرهای محیطی رندر برای پایداری کامل
+    env_session_string = os.environ.get("SESSION_STRING", "")
+    session_file_exists = SESSION_PATH.exists() or Path("userbot.session").exists()
 
-    API_ID = int(bot_config["api_id"])
-    API_HASH = bot_config["api_hash"]
-    PHONE = bot_config["phone"]
+    if not env_session_string and not session_file_exists and (not bot_config.get("api_id") or not bot_config.get("api_hash") or not bot_config.get("phone")):
+        while not bot_config.get("api_id") or not bot_config.get("api_hash") or not bot_config.get("phone"):
+            set_login_state("config", "لطفاً مشخصات را از طریق صفحه وب وارد کنید.")
+            print("[LOGIN] Waiting for credentials via web page...")
+            bot_config = await config_queue.get()
+            import json
+            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+                json.dump(bot_config, f)
+
+    API_ID = int(bot_config["api_id"]) if bot_config.get("api_id") else int(os.environ.get("API_ID", 0))
+    API_HASH = bot_config["api_hash"] if bot_config.get("api_hash") else os.environ.get("API_HASH", "")
+    PHONE = bot_config["phone"] if bot_config.get("phone") else ""
     PASSWORD_2FA = bot_config.get("password_2fa", "")
 
-    SESSION_DIR.mkdir(exist_ok=True)
-    client = TelegramClient(
-        str(SESSION_PATH),
-        API_ID,
-        API_HASH,
-        auto_reconnect=True,
-        connection_retries=None,
-        request_retries=5,
-        retry_delay=5,
-        flood_sleep_threshold=60,
-    )
+    # مقداردهی کلاینت با پشتیبانی از StringSession
+    if env_session_string:
+        client = TelegramClient(
+            StringSession(env_session_string),
+            API_ID if API_ID != 0 else 123456,
+            API_HASH if API_HASH else "placeholder",
+            auto_reconnect=True,
+            connection_retries=None,
+            request_retries=5,
+            retry_delay=5,
+            flood_sleep_threshold=60,
+        )
+    else:
+        client = TelegramClient(
+            str(SESSION_PATH),
+            API_ID if API_ID != 0 else 123456,
+            API_HASH if API_HASH else "placeholder",
+            auto_reconnect=True,
+            connection_retries=None,
+            request_retries=5,
+            retry_delay=5,
+            flood_sleep_threshold=60,
+        )
 
-    # ثبت ایونت‌ها روی کلاینت جدید
     register_events(client)
 
     await client.connect()
 
     if await client.is_user_authorized():
         set_login_state("authenticated", "Existing Telegram session is valid.")
-        print("[LOGIN] Existing session reused.")
+        print("[LOGIN] Existing session reused successfully.")
+        # اگر سشن با موفقیت لود شد، در صورت تمایل رشته سشن را برای ذخیره در رندر چاپ می‌کند
+        try:
+            print("[SESSION_STRING_BACKUP]", client.session.save())
+        except Exception:
+            pass
         return
 
-    print("[LOGIN] Session is not authorized.")
+    if not PHONE:
+        set_login_state("config", "سشن منقضی شده است. لطفاً دوباره مشخصات را وارد کنید.")
+        bot_config = await config_queue.get()
+        import json
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(bot_config, f)
+        API_ID = int(bot_config["api_id"])
+        API_HASH = bot_config["api_hash"]
+        PHONE = bot_config["phone"]
+        PASSWORD_2FA = bot_config.get("password_2fa", "")
+        
+        await client.disconnect()
+        client = TelegramClient(
+            str(SESSION_PATH),
+            API_ID,
+            API_HASH,
+            auto_reconnect=True,
+            connection_retries=None,
+            request_retries=5,
+            retry_delay=5,
+            flood_sleep_threshold=60,
+        )
+        register_events(client)
+        await client.connect()
+
+    print("[LOGIN] Session is not authorized. Requesting login code...")
     set_login_state("starting", "Requesting a new Telegram login code...")
     await client.send_code_request(PHONE)
     set_login_state("code", "Telegram login code requested.")
@@ -306,6 +351,16 @@ async def authenticate():
         else:
             password = await password_queue.get()
         await client.sign_in(password=password)
+
+    # پس از لاگین موفق، رشته سشن جدید را در کنسول چاپ می‌کند تا بتوانید آن را در رندر قرار دهید
+    try:
+        new_session_str = client.session.save()
+        print("======================================")
+        print("✅ NEW SESSION STRING (Save this in Render env as SESSION_STRING):")
+        print(new_session_str)
+        print("======================================")
+    except Exception:
+        pass
 
     set_login_state("authenticated", "Authentication successful.")
     print("[LOGIN] Authentication successful.")
@@ -330,11 +385,12 @@ def parse_interval(value):
 
 
 # ============================================================
-# EVENT HANDLERS REGISTRATION (دستورات و پاسخ‌های شما دست‌نخورده)
+# EVENT HANDLERS REGISTRATION (All Old & New Features)
 # ============================================================
 
 def register_events(cli):
 
+    # ۱. دستورات زمان‌بندی پیام (.set)
     @cli.on(events.NewMessage(outgoing=True, pattern=r"^\.set(?:\s|$)"))
     async def set_scheduled_messages(event):
         match = re.fullmatch(r"\.set\s+(\d+)\s+(.+?)\s+(\d+(?:\.\d+)?[smh]?)", event.raw_text.strip(), re.IGNORECASE)
@@ -361,6 +417,7 @@ def register_events(cli):
             await event.edit(f"❌ خطا: {type(error).__name__}: {error}")
 
 
+    # ۲. ریپلای خودکار (.reply و .stopreply)
     reply_rules = {}
 
     @cli.on(events.NewMessage(outgoing=True, pattern=r"^\.reply(?:\s|$)"))
@@ -391,6 +448,7 @@ def register_events(cli):
         await event.edit("🛑 ریپلای خودکار متوقف شد.")
 
 
+    # ۳. حالت نجات پیشی (.cat و .stopcat)
     cat_chats = set()
 
     @cli.on(events.NewMessage(outgoing=True, pattern=r"^\.cat$"))
@@ -424,16 +482,140 @@ def register_events(cli):
         await check_cat_message(event.message)
 
 
+    # ۴. ابزارهای عمومی (.ping و .whoami)
     @cli.on(events.NewMessage(outgoing=True, pattern=r"^\.ping$"))
     async def ping(event):
         await event.edit("✅ Userbot is online.")
-
 
     @cli.on(events.NewMessage(outgoing=True, pattern=r"^\.whoami$"))
     async def whoami(event):
         me = await cli.get_me()
         username = f"@{me.username}" if me.username else "No username"
         await event.edit(f"Name: {me.first_name or ''}\nUsername: {username}\nID: {me.id}")
+
+
+# ============================================================
+# .FISH (Fish & Cooking Automation Loop)
+# ============================================================
+
+fish_tasks = {}
+
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.fish$")) if client else lambda f: f
+async def start_fish_loop(event):
+    chat_id = event.chat_id
+    
+    if chat_id in fish_tasks:
+        await event.edit("⚠️ اتومیشن ماهی برای این چت قبلاً روشن شده است.")
+        return
+
+    await event.edit("🐟 اتومیشن ماهی هر ۳۱ دقیقه فعال شد.")
+    
+    async def fish_worker():
+        try:
+            while chat_id in fish_tasks:
+                # ۱. ارسال کلمه ماهی
+                await client.send_message(chat_id, "ماهی")
+                await asyncio.sleep(3)
+                
+                # ۲. پیدا کردن و کلیک روی دکمه "بندازش تو یخچال"
+                async for message in client.iter_messages(chat_id, limit=2):
+                    if message.buttons:
+                        for row in message.buttons:
+                            for btn in row:
+                                if "بندازش تو یخچال" in getattr(btn, "text", ""):
+                                    await btn.click()
+                                    break
+                
+                # مکث چند ثانیه‌ای قبل از نوشتن "یخچال میویی"
+                await asyncio.sleep(4)
+                
+                # ۳. ارسال دستور "یخچال میویی" برای باز کردن یخچال
+                await client.send_message(chat_id, "یخچال میویی")
+                await asyncio.sleep(4)
+                
+                # ۴. انتخاب ماهی‌های خام در یخچال و کلیک روی دکمه "بپوخش"
+                async for message in client.iter_messages(chat_id, limit=2):
+                    if message.buttons:
+                        for row in message.buttons:
+                            for btn in row:
+                                btn_text = getattr(btn, "text", "")
+                                if "خام" in btn_text or "بپوخش" in btn_text:
+                                    await btn.click()
+                                    await asyncio.sleep(1.5)
+                
+                await asyncio.sleep(2)
+
+                # ۵. تایید نهایی در صفحه جدید (کلیک روی دکمه تیک ✅)
+                async for message in client.iter_messages(chat_id, limit=2):
+                    if message.buttons:
+                        for row in message.buttons:
+                            for btn in row:
+                                btn_text = getattr(btn, "text", "")
+                                if "✅" in btn_text or "تایید" in btn_text or "تيك" in btn_text:
+                                    await btn.click()
+                                    break
+
+                # ۶. صبر کردن برای ۳۱ دقیقه بعدی (31 * 60 ثانیه)
+                for _ in range(31 * 60):
+                    if chat_id not in fish_tasks:
+                        break
+                    await asyncio.sleep(1)
+                    
+        except Exception as error:
+            print("[FISH ERROR]", type(error).__name__, str(error))
+            fish_tasks.pop(chat_id, None)
+
+    task = asyncio.create_task(fish_worker())
+    fish_tasks[chat_id] = task
+
+
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopfish$")) if client else lambda f: f
+async def stop_fish_loop(event):
+    chat_id = event.chat_id
+    task = fish_tasks.pop(chat_id, None)
+    
+    if task:
+        task.cancel()
+        await event.edit("🛑 اتومیشن ماهی متوقف شد.")
+    else:
+        await event.edit("⚠️ اتومیشن ماهی در این چت فعال نیست.")
+
+
+# ============================================================
+# .STATUS (Comprehensive Task Reporter)
+# ============================================================
+
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.status$")) if client else lambda f: f
+async def check_all_bot_activities(event):
+    chat_id = event.chat_id
+    
+    status_lines = ["<b>🤖 گزارش جامع فعالیت‌های ربات:</b>\n"]
+    
+    # بررسی وضعیت اتومیشن ماهی (.fish)
+    if fish_tasks:
+        status_lines.append("<b>🐟 اتومیشن ماهی (.fish):</b>")
+        for cid in fish_tasks.keys():
+            status_lines.append(f"• در حال اجرا در چت: <code>{cid}</code>")
+    else:
+        status_lines.append("<b>🐟 اتومیشن ماهی (.fish):</b> هیچ تسک فعالی ندارد ❌")
+        
+    status_lines.append("")
+    
+    # بررسی کلی سایر تسک‌های فعال در حافظه
+    active_globals = []
+    for var_name, var_value in globals().items():
+        if isinstance(var_value, dict) and var_value and var_name.endswith('_tasks') and var_name != 'fish_tasks':
+            active_globals.append(f"• <b>{var_name}:</b> {len(var_value)} مورد فعال")
+            
+    if active_globals:
+        status_lines.append("<b>⚙️ سایر تسک‌های فعال سیستم:</b>")
+        status_lines.extend(active_globals)
+    
+    status_lines.append("")
+    status_lines.append(f"<b>📍 مشخصات چت فعلی:</b> <code>{chat_id}</code>")
+    
+    response_text = "\n".join(status_lines)
+    await event.edit(response_text, parse_mode='html')
 
 
 # ============================================================
@@ -477,129 +659,3 @@ if __name__ == "__main__":
         print(type(error).__name__, str(error))
         print("======================================")
         raise
-        # ============================================================
-# .FISH (Fish Automation Loop)
-# ============================================================
-
-fish_tasks = {}
-
-@client.on(events.NewMessage(outgoing=True, pattern=r"^\.fish$"))
-async def start_fish_loop(event):
-    chat_id = event.chat_id
-    
-    if chat_id in fish_tasks:
-        await event.edit("⚠️ اتومیشن ماهی برای این چت قبلاً روشن شده است.")
-        return
-
-    await event.edit("🐟 اتومیشن ماهی هر ۳۱ دقیقه فعال شد.")
-    
-    async def fish_worker():
-        try:
-            while chat_id in fish_tasks:
-                # ۱. ارسال کلمه ماهی
-                await client.send_message(chat_id, "ماهی")
-                await asyncio.sleep(3)
-                
-                # ۲. پیدا کردن و کلیک روی دکمه "بندازش تو یخچال"
-                async for message in client.iter_messages(chat_id, limit=2):
-                    if message.buttons:
-                        for row in message.buttons:
-                            for btn in row:
-                                if "بندازش تو یخچال" in getattr(btn, "text", ""):
-                                    await btn.click()
-                                    print("[FISH] Clicked send to fridge")
-                                    break
-                
-                # مکث چند ثانیه‌ای قبل از نوشتن "یخچال میویی"
-                await asyncio.sleep(4)
-                
-                # ۳. ارسال دستور "یخچال میویی" برای باز کردن یخچال
-                await client.send_message(chat_id, "یخچال میویی")
-                await asyncio.sleep(4)
-                
-                # ۴. انتخاب ماهی‌های خام در یخچال و کلیک روی دکمه "بپوخش"
-                async for message in client.iter_messages(chat_id, limit=2):
-                    if message.buttons:
-                        for row in message.buttons:
-                            for btn in row:
-                                btn_text = getattr(btn, "text", "")
-                                # انتخاب گزینه‌های ماهی خام یا دکمه پختن
-                                if "خام" in btn_text or "بپوخش" in btn_text:
-                                    await btn.click()
-                                    await asyncio.sleep(1.5)
-                
-                await asyncio.sleep(2)
-
-                # ۵. تایید نهایی در صفحه جدید (کلیک روی دکمه تیک ✅)
-                async for message in client.iter_messages(chat_id, limit=2):
-                    if message.buttons:
-                        for row in message.buttons:
-                            for btn in row:
-                                btn_text = getattr(btn, "text", "")
-                                # بررسی ایموجی تیک یا کلمات تایید
-                                if "✅" in btn_text or "تایید" in btn_text or "تيك" in btn_text:
-                                    await btn.click()
-                                    print(f"[FISH] Clicked confirmation: {btn_text}")
-                                    break
-
-                # ۶. صبر کردن برای ۳۱ دقیقه بعدی (31 * 60 ثانیه)
-                for _ in range(31 * 60):
-                    if chat_id not in fish_tasks:
-                        break
-                    await asyncio.sleep(1)
-                    
-        except Exception as error:
-            print("[FISH ERROR]", type(error).__name__, str(error))
-            fish_tasks.pop(chat_id, None)
-
-    task = asyncio.create_task(fish_worker())
-    fish_tasks[chat_id] = task
-
-
-@client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopfish$"))
-async def stop_fish_loop(event):
-    chat_id = event.chat_id
-    task = fish_tasks.pop(chat_id, None)
-    
-    if task:
-        task.cancel()
-        await event.edit("🛑 اتومیشن ماهی متوقف شد.")
-    else:
-        await event.edit("⚠️ اتومیشن ماهی در این چت فعال نیست.")
-
-# ============================================================
-# .STATUS (Comprehensive Task Reporter)
-# ============================================================
-
-@client.on(events.NewMessage(outgoing=True, pattern=r"^\.status$"))
-async def check_all_bot_activities(event):
-    chat_id = event.chat_id
-    
-    status_lines = ["<b>🤖 گزارش جامع فعالیت‌های ربات:</b>\n"]
-    
-    # ۱. بررسی وضعیت اتومیشن ماهی (.fish)
-    if 'fish_tasks' in globals() and fish_tasks:
-        status_lines.append("<b>🐟 اتومیشن ماهی (.fish):</b>")
-        for cid in fish_tasks.keys():
-            status_lines.append(f"• در حال اجرا در چت: <code>{cid}</code>")
-    else:
-        status_lines.append("<b>🐟 اتومیشن ماهی (.fish):</b> هیچ تسک فعالی ندارد ❌")
-        
-    status_lines.append("")
-    
-    # ۲. بررسی کلی سایر متغیرها یا تسک‌های فعال در حافظه
-    active_globals = []
-    for var_name, var_value in globals().items():
-        if isinstance(var_value, dict) and var_value and var_name.endswith('_tasks') and var_name != 'fish_tasks':
-            active_globals.append(f"• <b>{var_name}:</b> {len(var_value)} مورد فعال")
-            
-    if active_globals:
-        status_lines.append("<b>⚙️ سایر تسک‌های فعال سیستم:</b>")
-        status_lines.extend(active_globals)
-    
-    status_lines.append("")
-    status_lines.append(f"<b>📍 مشخصات چت فعلی:</b> <code>{chat_id}</code>")
-    
-    # ویرایش پیام و ارسال گزارش نهایی
-    response_text = "\n".join(status_lines)
-    await event.edit(response_text, parse_mode='html')
