@@ -20,11 +20,12 @@ from telethon.sessions import StringSession
 SESSION_PATH = Path("userbot")
 PORT = int(os.environ.get("PORT", "8000"))
 
-# خواندن اطلاعات از متغیرهای محیطی رندر (Environment)
-API_ID = int(os.environ.get("API_ID", 0))
-API_HASH = os.environ.get("API_HASH", "")
-PHONE = os.environ.get("PHONE", "")
-PASSWORD_2FA = os.environ.get("PASSWORD_2FA", "")
+# خوا# خواندن اطلاعات از متغیرهای محیطی رندر (Environment)
+_raw_api_id = os.environ.get("API_ID", "0").strip()
+API_ID = int(_raw_api_id) if _raw_api_id.isdigit() else 0
+API_HASH = os.environ.get("API_HASH", "").strip()
+PHONE = os.environ.get("PHONE", "").strip()
+PASSWORD_2FA = os.environ.get("PASSWORD_2FA", "").strip()
 
 client = None
 MAIN_LOOP = None
