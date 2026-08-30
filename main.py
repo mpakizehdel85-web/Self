@@ -6,16 +6,11 @@ import threading
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import parse_qs
 
 from telethon import TelegramClient, events
-from telethon.errors import (
-    SessionPasswordNeededError,
-    PhoneCodeInvalidError,
-    PhoneCodeExpiredError,
-    PasswordHashInvalidError,
-)
-from telethon.sessions import StringSession
+from telethon.errors import SessionPasswordNeededError
 
 
 # ============================================================
@@ -25,34 +20,18 @@ from telethon.sessions import StringSession
 API_ID = int(os.environ["TELEGRAM_API_ID"])
 API_HASH = os.environ["TELEGRAM_API_HASH"]
 PHONE = os.environ["TELEGRAM_PHONE"]
+PASSWORD_2FA = os.environ.get("TELEGRAM_2FA_PASSWORD", "")
 
-PASSWORD_2FA = os.environ.get(
-    "TELEGRAM_2FA_PASSWORD",
-    ""
-).strip()
+SESSION_DIR = Path(".telegram_sessions")
+SESSION_DIR.mkdir(parents=True, exist_ok=True)
+SESSION_PATH = SESSION_DIR / "userbot"
 
-PORT = int(
-    os.environ.get(
-        "PORT",
-        "8000"
-    )
-)
-
-
-# ============================================================
-# TELEGRAM STRING SESSION
-# ============================================================
-
-SESSION_STRING = os.environ.get(
-    "TELEGRAM_SESSION",
-    ""
-).strip()
+PORT = int(os.environ.get("PORT", "8000"))
 
 client = TelegramClient(
-    StringSession(SESSION_STRING),
+    str(SESSION_PATH),
     API_ID,
     API_HASH,
-
     auto_reconnect=True,
     connection_retries=None,
     request_retries=5,
@@ -62,193 +41,92 @@ client = TelegramClient(
 
 
 # ============================================================
-# LOGIN STATE
+# LOGIN WEB PAGE
 # ============================================================
 
 login_state = "starting"
-
-login_message = (
-    "Connecting to Telegram..."
-)
+login_message = "Connecting to Telegram..."
 
 MAIN_LOOP = None
-
 code_queue = asyncio.Queue()
 password_queue = asyncio.Queue()
 
 
-def set_login_state(
-    state,
-    message
-):
-
-    global login_state
-    global login_message
-
+def set_login_state(state, message):
+    global login_state, login_message
     login_state = state
     login_message = message
+    print("[LOGIN]", message)
 
-    print(
-        "[LOGIN]",
-        message
-    )
-
-
-# ============================================================
-# HTML PAGE
-# ============================================================
 
 def page_template(content):
-
     return f"""<!doctype html>
-
 <html>
-
 <head>
-
 <meta charset="utf-8">
-
-<meta
-    name="viewport"
-    content="width=device-width,initial-scale=1"
->
-
-<title>
-Telegram Userbot
-</title>
-
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Telegram Userbot</title>
 <style>
-
 body {{
     margin:0;
     min-height:100vh;
-
     display:grid;
     place-items:center;
-
     background:#10131a;
     color:#fff;
-
-    font-family:
-        system-ui,
-        -apple-system,
-        BlinkMacSystemFont,
-        "Segoe UI",
-        sans-serif;
+    font-family:system-ui,sans-serif;
 }}
-
 main {{
     width:min(92vw,400px);
-
     padding:28px;
-
     box-sizing:border-box;
-
     border-radius:16px;
-
     background:#191e28;
-
     border:1px solid #303746;
 }}
-
-h2 {{
-    margin-top:0;
-}}
-
 input {{
     width:100%;
-
     box-sizing:border-box;
-
     padding:12px;
-
     margin-top:8px;
-
     border-radius:9px;
-
     border:1px solid #465064;
-
     background:#0d1117;
-
     color:#fff;
-
     font-size:17px;
 }}
-
 button {{
     width:100%;
-
     margin-top:18px;
-
     padding:12px;
-
     border:0;
-
     border-radius:9px;
-
     background:#4f8cff;
-
     color:white;
-
     font-size:16px;
-
     font-weight:700;
 }}
-
-p {{
-    color:#b8c0cf;
-
-    line-height:1.5;
-}}
-
-.error {{
-    color:#ff7777;
-}}
-
+p {{ color:#b8c0cf; line-height:1.5; }}
 </style>
-
 </head>
-
 <body>
-
 <main>
-
 {content}
-
 </main>
-
 </body>
-
 </html>"""
 
-
-# ============================================================
-# LOGIN PAGE
-# ============================================================
 
 def login_page():
 
     if login_state == "code":
 
         return page_template("""
-<h2>
-Telegram Login
-</h2>
+<h2>Telegram Login</h2>
+<p>کد یک‌بارمصرف تلگرام را وارد کن.</p>
 
-<p>
-کد ارسال‌شده توسط تلگرام را وارد کن.
-</p>
-
-<form
-    method="post"
-    action="/code"
-    autocomplete="off"
->
-
-<label>
-Login Code
-</label>
-
+<form method="post" action="/code" autocomplete="off">
+<label>Login Code</label>
 <input
     name="code"
     type="text"
@@ -256,152 +134,68 @@ Login Code
     autocomplete="one-time-code"
     required
 >
-
-<button
-    type="submit"
->
-ورود
-</button>
-
+<button type="submit">ورود</button>
 </form>
 """)
-
 
     if login_state == "password":
 
         return page_template("""
-<h2>
-Two-Step Verification
-</h2>
+<h2>Two-Step Verification</h2>
+<p>رمز دو مرحله‌ای تلگرام را وارد کن.</p>
 
-<p>
-رمز دومرحله‌ای تلگرام را وارد کن.
-</p>
-
-<form
-    method="post"
-    action="/password"
-    autocomplete="off"
->
-
-<label>
-2FA Password
-</label>
-
+<form method="post" action="/password" autocomplete="off">
+<label>2FA Password</label>
 <input
     name="password"
     type="password"
     autocomplete="current-password"
     required
 >
-
-<button
-    type="submit"
->
-ادامه
-</button>
-
+<button type="submit">ادامه</button>
 </form>
 """)
-
 
     if login_state == "authenticated":
 
         return page_template("""
-<h2>
-✅ Telegram Connected
-</h2>
+<h2>✅ Telegram Connected</h2>
+<p>Userbot با موفقیت متصل شده است.</p>
+""")
 
-<p>
-Userbot با موفقیت به اکانت تلگرام متصل شده است.
-</p>
+    return page_template(f"""
+<h2>Telegram Userbot</h2>
+<p>{html.escape(login_message)}</p>
+<meta http-equiv="refresh" content="2">
 """)
 
 
-    if login_state == "error":
-
-        return page_template(
-            f"""
-<h2>
-❌ Login Error
-</h2>
-
-<p class="error">
-{html.escape(login_message)}
-</p>
-
-<p>
-لطفاً صفحه را Refresh کن.
-</p>
-"""
-        )
-
-
-    return page_template(
-        f"""
-<h2>
-Telegram Userbot
-</h2>
-
-<p>
-{html.escape(login_message)}
-</p>
-
-<meta
-    http-equiv="refresh"
-    content="2"
->
-"""
-    )
-
-
-# ============================================================
-# WEB HANDLER
-# ============================================================
-
-class LoginHandler(
-    BaseHTTPRequestHandler
-):
+class LoginHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
 
         if self.path != "/":
-
-            self.send_error(
-                HTTPStatus.NOT_FOUND
-            )
-
+            self.send_error(HTTPStatus.NOT_FOUND)
             return
 
-        body = login_page().encode(
-            "utf-8"
-        )
+        body = login_page().encode("utf-8")
 
-        self.send_response(
-            HTTPStatus.OK
-        )
-
+        self.send_response(HTTPStatus.OK)
         self.send_header(
             "Content-Type",
             "text/html; charset=utf-8"
         )
-
         self.send_header(
             "Content-Length",
             str(len(body))
         )
-
         self.send_header(
             "Cache-Control",
             "no-store"
         )
-
         self.end_headers()
 
-        self.wfile.write(
-            body
-        )
-
+        self.wfile.write(body)
 
     def do_POST(self):
 
@@ -412,21 +206,12 @@ class LoginHandler(
             )
         )
 
-        body = self.rfile.read(
-            length
-        ).decode(
-            "utf-8"
-        )
+        body = self.rfile.read(length).decode("utf-8")
 
         values = parse_qs(
             body,
             keep_blank_values=True
         )
-
-
-        # ====================================================
-        # CODE
-        # ====================================================
 
         if self.path == "/code":
 
@@ -435,13 +220,12 @@ class LoginHandler(
                 [""]
             )[0].strip()
 
-            if not code:
+            if not code.isdigit():
 
                 self.send_error(
                     HTTPStatus.BAD_REQUEST,
-                    "Code required"
+                    "Invalid code"
                 )
-
                 return
 
             if MAIN_LOOP:
@@ -454,11 +238,6 @@ class LoginHandler(
             self.redirect()
 
             return
-
-
-        # ====================================================
-        # PASSWORD
-        # ====================================================
 
         if self.path == "/password":
 
@@ -473,7 +252,6 @@ class LoginHandler(
                     HTTPStatus.BAD_REQUEST,
                     "Password required"
                 )
-
                 return
 
             if MAIN_LOOP:
@@ -487,11 +265,9 @@ class LoginHandler(
 
             return
 
-
         self.send_error(
             HTTPStatus.NOT_FOUND
         )
-
 
     def redirect(self):
 
@@ -506,27 +282,14 @@ class LoginHandler(
 
         self.end_headers()
 
-
-    def log_message(
-        self,
-        format,
-        *args
-    ):
-
+    def log_message(self, format, *args):
         return
 
-
-# ============================================================
-# WEB SERVER
-# ============================================================
 
 def start_web_server():
 
     server = ThreadingHTTPServer(
-        (
-            "0.0.0.0",
-            PORT
-        ),
+        ("0.0.0.0", PORT),
         LoginHandler
     )
 
@@ -536,7 +299,7 @@ def start_web_server():
     ).start()
 
     print(
-        f"[WEB] Login page running on port {PORT}"
+        f"[WEB] Login page: port {PORT}"
     )
 
     return server
@@ -550,11 +313,6 @@ async def authenticate():
 
     await client.connect()
 
-
-    # ========================================================
-    # EXISTING SESSION
-    # ========================================================
-
     if await client.is_user_authorized():
 
         set_login_state(
@@ -563,55 +321,23 @@ async def authenticate():
         )
 
         print(
-            "[LOGIN] Existing StringSession reused."
+            "[LOGIN] Existing session reused."
         )
 
         return
 
-
-    # ========================================================
-    # NO SESSION
-    # ========================================================
-
     print(
-        "[LOGIN] No valid Telegram session found."
+        "[LOGIN] Session is not authorized."
     )
 
     set_login_state(
         "starting",
-        "Requesting Telegram login code..."
+        "Requesting a new Telegram login code..."
     )
 
-
-    # ========================================================
-    # SEND CODE
-    # ========================================================
-
-    try:
-
-        await client.send_code_request(
-            PHONE
-        )
-
-    except Exception as error:
-
-        print(
-            "[LOGIN ERROR] SEND CODE:"
-        )
-
-        print(
-            type(error).__name__,
-            str(error)
-        )
-
-        set_login_state(
-            "error",
-            f"خطا در ارسال کد: "
-            f"{type(error).__name__}"
-        )
-
-        raise
-
+    await client.send_code_request(
+        PHONE
+    )
 
     set_login_state(
         "code",
@@ -619,24 +345,10 @@ async def authenticate():
     )
 
     print(
-        "[LOGIN] Waiting for login code..."
+        "[LOGIN] Waiting for code..."
     )
-
-
-    # ========================================================
-    # WAIT FOR CODE
-    # ========================================================
 
     code = await code_queue.get()
-
-    print(
-        "[LOGIN] Code received."
-    )
-
-
-    # ========================================================
-    # SIGN IN WITH CODE
-    # ========================================================
 
     try:
 
@@ -645,164 +357,24 @@ async def authenticate():
             code=code
         )
 
-        print(
-            "[LOGIN] Code accepted."
-        )
-
-
     except SessionPasswordNeededError:
 
-        print(
-            "[LOGIN] Telegram requires 2FA password."
+        set_login_state(
+            "password",
+            "Telegram requires your 2FA password."
         )
-
-
-        # ====================================================
-        # AUTOMATIC 2FA PASSWORD
-        # ====================================================
 
         if PASSWORD_2FA:
 
-            print(
-                "[LOGIN] Using TELEGRAM_2FA_PASSWORD."
-            )
-
             password = PASSWORD_2FA
-
-
-        # ====================================================
-        # MANUAL 2FA PASSWORD
-        # ====================================================
 
         else:
 
-            set_login_state(
-                "password",
-                "Telegram requires your 2FA password."
-            )
-
-            print(
-                "[LOGIN] Waiting for 2FA password..."
-            )
-
             password = await password_queue.get()
 
-
-        # ====================================================
-        # SIGN IN WITH PASSWORD
-        # ====================================================
-
-        try:
-
-            await client.sign_in(
-                password=password
-            )
-
-            print(
-                "[LOGIN] 2FA password accepted."
-            )
-
-        except PasswordHashInvalidError:
-
-            set_login_state(
-                "error",
-                "رمز دومرحله‌ای اشتباه است."
-            )
-
-            print(
-                "[LOGIN ERROR] Invalid 2FA password."
-            )
-
-            raise
-
-
-        except Exception as error:
-
-            set_login_state(
-                "error",
-                f"خطا در رمز دوم: "
-                f"{type(error).__name__}"
-            )
-
-            print(
-                "[LOGIN ERROR] 2FA:"
-            )
-
-            print(
-                type(error).__name__,
-                str(error)
-            )
-
-            raise
-
-
-    except PhoneCodeInvalidError:
-
-        set_login_state(
-            "error",
-            "کد واردشده اشتباه است."
+        await client.sign_in(
+            password=password
         )
-
-        print(
-            "[LOGIN ERROR] Invalid Telegram code."
-        )
-
-        raise
-
-
-    except PhoneCodeExpiredError:
-
-        set_login_state(
-            "error",
-            "کد تلگرام منقضی شده است. دوباره درخواست کد بده."
-        )
-
-        print(
-            "[LOGIN ERROR] Telegram code expired."
-        )
-
-        raise
-
-
-    except Exception as error:
-
-        set_login_state(
-            "error",
-            f"خطا در ورود با کد: "
-            f"{type(error).__name__}"
-        )
-
-        print(
-            "[LOGIN ERROR] CODE:"
-        )
-
-        print(
-            type(error).__name__,
-            str(error)
-        )
-
-        raise
-
-
-    # ========================================================
-    # VERIFY
-    # ========================================================
-
-    if not await client.is_user_authorized():
-
-        set_login_state(
-            "error",
-            "ورود به تلگرام موفق نبود."
-        )
-
-        raise RuntimeError(
-            "Telegram authentication failed."
-        )
-
-
-    # ========================================================
-    # LOGIN SUCCESS
-    # ========================================================
 
     set_login_state(
         "authenticated",
@@ -811,31 +383,6 @@ async def authenticate():
 
     print(
         "[LOGIN] Authentication successful."
-    )
-
-
-    # ========================================================
-    # STRING SESSION
-    # ========================================================
-
-    print(
-        "======================================"
-    )
-
-    print(
-        "[SESSION] NEW_SESSION_STRING:"
-    )
-
-    print(
-        client.session.save()
-    )
-
-    print(
-        "[SESSION] END"
-    )
-
-    print(
-        "======================================"
     )
 
 
@@ -869,14 +416,12 @@ def parse_interval(value):
         if unit == "h":
             return number * 3600
 
-
     if re.fullmatch(
         r"\d+(?:\.\d+)?",
         value
     ):
 
         return float(value) * 60
-
 
     return None
 
@@ -911,7 +456,6 @@ async def set_scheduled_messages(event):
 
         return
 
-
     count = int(
         match.group(1)
     )
@@ -924,7 +468,6 @@ async def set_scheduled_messages(event):
         interval_text
     )
 
-
     if count <= 0:
 
         await event.edit(
@@ -932,7 +475,6 @@ async def set_scheduled_messages(event):
         )
 
         return
-
 
     if interval is None or interval <= 0:
 
@@ -942,13 +484,11 @@ async def set_scheduled_messages(event):
 
         return
 
-
     now = datetime.now(
         timezone.utc
     )
 
     scheduled = 0
-
 
     try:
 
@@ -972,7 +512,6 @@ async def set_scheduled_messages(event):
 
             scheduled += 1
 
-
         await event.edit(
             "✅ پیام‌های زمان‌بندی‌شده ساخته شدند.\n\n"
             f"تعداد: {scheduled}\n"
@@ -981,12 +520,10 @@ async def set_scheduled_messages(event):
             "📅 پیام‌ها در Scheduled Messages تلگرام قرار گرفتند."
         )
 
-
         print(
             f"[SET] Scheduled {scheduled} messages "
             f"in chat {event.chat_id}"
         )
-
 
     except Exception as error:
 
@@ -1035,21 +572,16 @@ async def create_reply(event):
 
         return
 
-
     response = match.group(1).strip()
-
     trigger = match.group(2).strip()
-
 
     if event.chat_id not in reply_rules:
 
         reply_rules[event.chat_id] = {}
 
-
     reply_rules[event.chat_id][
         trigger.casefold()
     ] = response
-
 
     await event.edit(
         "✅ ریپلای فعال شد\n\n"
@@ -1069,17 +601,12 @@ async def automatic_reply(event):
     if event.reply_to_msg_id:
         return
 
-
     chat_id = event.chat_id
 
-
     if chat_id not in reply_rules:
-
         return
 
-
     incoming = event.raw_text.strip()
-
 
     response = reply_rules[
         chat_id
@@ -1087,11 +614,8 @@ async def automatic_reply(event):
         incoming.casefold()
     )
 
-
     if response is None:
-
         return
-
 
     try:
 
@@ -1171,14 +695,10 @@ async def stop_cat(event):
 async def check_cat_message(message):
 
     if message.chat_id not in cat_chats:
-
         return
-
 
     if not message.buttons:
-
         return
-
 
     for row in message.buttons:
 
@@ -1189,7 +709,6 @@ async def check_cat_message(message):
                 "text",
                 ""
             )
-
 
             if (
                 text
@@ -1271,13 +790,11 @@ async def whoami(event):
 
     me = await client.get_me()
 
-
     username = (
         f"@{me.username}"
         if me.username
         else "No username"
     )
-
 
     await event.edit(
         f"Name: {me.first_name or ''}\n"
@@ -1296,9 +813,7 @@ async def main():
 
     MAIN_LOOP = asyncio.get_running_loop()
 
-
     start_web_server()
-
 
     print(
         "======================================"
@@ -1312,12 +827,9 @@ async def main():
         "======================================"
     )
 
-
     await authenticate()
 
-
     me = await client.get_me()
-
 
     print(
         "======================================"
@@ -1338,7 +850,6 @@ async def main():
     print(
         "======================================"
     )
-
 
     print(
         "Commands:"
@@ -1368,7 +879,6 @@ async def main():
         "======================================"
     )
 
-
     await client.run_until_disconnected()
 
 
@@ -1384,13 +894,11 @@ if __name__ == "__main__":
             main()
         )
 
-
     except KeyboardInterrupt:
 
         print(
             "Userbot stopped."
         )
-
 
     except Exception as error:
 
