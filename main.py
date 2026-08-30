@@ -17,8 +17,7 @@ from telethon.errors import SessionPasswordNeededError
 # ============================================================
 
 CONFIG_FILE = Path(".bot_config.json")
-SESSION_DIR = Path(".telegram_sessions")
-SESSION_PATH = SESSION_DIR / "userbot"
+SESSION_PATH = Path("userbot")
 
 PORT = int(os.environ.get("PORT", "8000"))
 
@@ -478,3 +477,93 @@ if __name__ == "__main__":
         print(type(error).__name__, str(error))
         print("======================================")
         raise
+        # ============================================================
+# .FISH (Fish Automation Loop)
+# ============================================================
+
+fish_tasks = {}
+
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.fish$"))
+async def start_fish_loop(event):
+    chat_id = event.chat_id
+    
+    if chat_id in fish_tasks:
+        await event.edit("⚠️ اتومیشن ماهی برای این چت قبلاً روشن شده است.")
+        return
+
+    await event.edit("🐟 اتومیشن ماهی هر ۳۱ دقیقه فعال شد.")
+    
+    async def fish_worker():
+        try:
+            while chat_id in fish_tasks:
+                # ۱. ارسال کلمه ماهی
+                await client.send_message(chat_id, "ماهی")
+                await asyncio.sleep(3)
+                
+                # ۲. پیدا کردن و کلیک روی دکمه "بندازش تو یخچال"
+                async for message in client.iter_messages(chat_id, limit=2):
+                    if message.buttons:
+                        for row in message.buttons:
+                            for btn in row:
+                                if "بندازش تو یخچال" in getattr(btn, "text", ""):
+                                    await btn.click()
+                                    print("[FISH] Clicked send to fridge")
+                                    break
+                
+                # مکث چند ثانیه‌ای قبل از نوشتن "یخچال میویی"
+                await asyncio.sleep(4)
+                
+                # ۳. ارسال دستور "یخچال میویی" برای باز کردن یخچال
+                await client.send_message(chat_id, "یخچال میویی")
+                await asyncio.sleep(4)
+                
+                # ۴. انتخاب ماهی‌های خام در یخچال و کلیک روی دکمه "بپوخش"
+                async for message in client.iter_messages(chat_id, limit=2):
+                    if message.buttons:
+                        for row in message.buttons:
+                            for btn in row:
+                                btn_text = getattr(btn, "text", "")
+                                # انتخاب گزینه‌های ماهی خام یا دکمه پختن
+                                if "خام" in btn_text or "بپوخش" in btn_text:
+                                    await btn.click()
+                                    await asyncio.sleep(1.5)
+                
+                await asyncio.sleep(2)
+
+                # ۵. تایید نهایی در صفحه جدید (کلیک روی دکمه تیک ✅)
+                async for message in client.iter_messages(chat_id, limit=2):
+                    if message.buttons:
+                        for row in message.buttons:
+                            for btn in row:
+                                btn_text = getattr(btn, "text", "")
+                                # بررسی ایموجی تیک یا کلمات تایید
+                                if "✅" in btn_text or "تایید" in btn_text or "تيك" in btn_text:
+                                    await btn.click()
+                                    print(f"[FISH] Clicked confirmation: {btn_text}")
+                                    break
+
+                # ۶. صبر کردن برای ۳۱ دقیقه بعدی (31 * 60 ثانیه)
+                for _ in range(31 * 60):
+                    if chat_id not in fish_tasks:
+                        break
+                    await asyncio.sleep(1)
+                    
+        except Exception as error:
+            print("[FISH ERROR]", type(error).__name__, str(error))
+            fish_tasks.pop(chat_id, None)
+
+    task = asyncio.create_task(fish_worker())
+    fish_tasks[chat_id] = task
+
+
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopfish$"))
+async def stop_fish_loop(event):
+    chat_id = event.chat_id
+    task = fish_tasks.pop(chat_id, None)
+    
+    if task:
+        task.cancel()
+        await event.edit("🛑 اتومیشن ماهی متوقف شد.")
+    else:
+        await event.edit("⚠️ اتومیشن ماهی در این چت فعال نیست.")
+
