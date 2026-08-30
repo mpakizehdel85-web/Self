@@ -6,11 +6,11 @@ import threading
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from urllib.parse import parse_qs
 
 from telethon import TelegramClient, events
 from telethon.errors import SessionPasswordNeededError
+from telethon.sessions import StringSession
 
 
 # ============================================================
@@ -22,14 +22,20 @@ API_HASH = os.environ["TELEGRAM_API_HASH"]
 PHONE = os.environ["TELEGRAM_PHONE"]
 PASSWORD_2FA = os.environ.get("TELEGRAM_2FA_PASSWORD", "")
 
-SESSION_DIR = Path(".telegram_sessions")
-SESSION_DIR.mkdir(parents=True, exist_ok=True)
-SESSION_PATH = SESSION_DIR / "userbot"
-
 PORT = int(os.environ.get("PORT", "8000"))
 
+
+# ============================================================
+# TELEGRAM SESSION
+# ============================================================
+
+SESSION_STRING = os.environ.get(
+    "TELEGRAM_SESSION",
+    ""
+).strip()
+
 client = TelegramClient(
-    str(SESSION_PATH),
+    StringSession(SESSION_STRING),
     API_ID,
     API_HASH,
     auto_reconnect=True,
@@ -41,32 +47,49 @@ client = TelegramClient(
 
 
 # ============================================================
-# LOGIN WEB PAGE
+# LOGIN STATE
 # ============================================================
 
 login_state = "starting"
 login_message = "Connecting to Telegram..."
 
 MAIN_LOOP = None
+
 code_queue = asyncio.Queue()
 password_queue = asyncio.Queue()
 
 
 def set_login_state(state, message):
+
     global login_state, login_message
+
     login_state = state
     login_message = message
+
     print("[LOGIN]", message)
 
 
+# ============================================================
+# LOGIN WEB PAGE
+# ============================================================
+
 def page_template(content):
+
     return f"""<!doctype html>
 <html>
 <head>
+
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+
+<meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+>
+
 <title>Telegram Userbot</title>
+
 <style>
+
 body {{
     margin:0;
     min-height:100vh;
@@ -76,6 +99,7 @@ body {{
     color:#fff;
     font-family:system-ui,sans-serif;
 }}
+
 main {{
     width:min(92vw,400px);
     padding:28px;
@@ -84,6 +108,7 @@ main {{
     background:#191e28;
     border:1px solid #303746;
 }}
+
 input {{
     width:100%;
     box-sizing:border-box;
@@ -95,6 +120,7 @@ input {{
     color:#fff;
     font-size:17px;
 }}
+
 button {{
     width:100%;
     margin-top:18px;
@@ -106,14 +132,26 @@ button {{
     font-size:16px;
     font-weight:700;
 }}
-p {{ color:#b8c0cf; line-height:1.5; }}
+
+p {{
+    color:#b8c0cf;
+    line-height:1.5;
+}}
+
 </style>
+
 </head>
+
 <body>
+
 <main>
+
 {content}
+
 </main>
+
 </body>
+
 </html>"""
 
 
@@ -123,10 +161,21 @@ def login_page():
 
         return page_template("""
 <h2>Telegram Login</h2>
-<p>کد یک‌بارمصرف تلگرام را وارد کن.</p>
 
-<form method="post" action="/code" autocomplete="off">
-<label>Login Code</label>
+<p>
+کد یک‌بارمصرف تلگرام را وارد کن.
+</p>
+
+<form
+    method="post"
+    action="/code"
+    autocomplete="off"
+>
+
+<label>
+Login Code
+</label>
+
 <input
     name="code"
     type="text"
@@ -134,7 +183,11 @@ def login_page():
     autocomplete="one-time-code"
     required
 >
-<button type="submit">ورود</button>
+
+<button type="submit">
+ورود
+</button>
+
 </form>
 """)
 
@@ -142,17 +195,32 @@ def login_page():
 
         return page_template("""
 <h2>Two-Step Verification</h2>
-<p>رمز دو مرحله‌ای تلگرام را وارد کن.</p>
 
-<form method="post" action="/password" autocomplete="off">
-<label>2FA Password</label>
+<p>
+رمز دو مرحله‌ای تلگرام را وارد کن.
+</p>
+
+<form
+    method="post"
+    action="/password"
+    autocomplete="off"
+>
+
+<label>
+2FA Password
+</label>
+
 <input
     name="password"
     type="password"
     autocomplete="current-password"
     required
 >
-<button type="submit">ادامه</button>
+
+<button type="submit">
+ادامه
+</button>
+
 </form>
 """)
 
@@ -160,39 +228,67 @@ def login_page():
 
         return page_template("""
 <h2>✅ Telegram Connected</h2>
-<p>Userbot با موفقیت متصل شده است.</p>
+
+<p>
+Userbot با موفقیت متصل شده است.
+</p>
 """)
 
-    return page_template(f"""
+    return page_template(
+        f"""
 <h2>Telegram Userbot</h2>
-<p>{html.escape(login_message)}</p>
-<meta http-equiv="refresh" content="2">
-""")
 
+<p>
+{html.escape(login_message)}
+</p>
+
+<meta
+    http-equiv="refresh"
+    content="2"
+>
+"""
+    )
+
+
+# ============================================================
+# WEB SERVER
+# ============================================================
 
 class LoginHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
 
         if self.path != "/":
-            self.send_error(HTTPStatus.NOT_FOUND)
+
+            self.send_error(
+                HTTPStatus.NOT_FOUND
+            )
+
             return
 
-        body = login_page().encode("utf-8")
+        body = login_page().encode(
+            "utf-8"
+        )
 
-        self.send_response(HTTPStatus.OK)
+        self.send_response(
+            HTTPStatus.OK
+        )
+
         self.send_header(
             "Content-Type",
             "text/html; charset=utf-8"
         )
+
         self.send_header(
             "Content-Length",
             str(len(body))
         )
+
         self.send_header(
             "Cache-Control",
             "no-store"
         )
+
         self.end_headers()
 
         self.wfile.write(body)
@@ -206,7 +302,11 @@ class LoginHandler(BaseHTTPRequestHandler):
             )
         )
 
-        body = self.rfile.read(length).decode("utf-8")
+        body = self.rfile.read(
+            length
+        ).decode(
+            "utf-8"
+        )
 
         values = parse_qs(
             body,
@@ -226,6 +326,7 @@ class LoginHandler(BaseHTTPRequestHandler):
                     HTTPStatus.BAD_REQUEST,
                     "Invalid code"
                 )
+
                 return
 
             if MAIN_LOOP:
@@ -252,6 +353,7 @@ class LoginHandler(BaseHTTPRequestHandler):
                     HTTPStatus.BAD_REQUEST,
                     "Password required"
                 )
+
                 return
 
             if MAIN_LOOP:
@@ -283,6 +385,7 @@ class LoginHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def log_message(self, format, *args):
+
         return
 
 
@@ -313,6 +416,10 @@ async def authenticate():
 
     await client.connect()
 
+    # --------------------------------------------------------
+    # EXISTING SESSION
+    # --------------------------------------------------------
+
     if await client.is_user_authorized():
 
         set_login_state(
@@ -321,10 +428,14 @@ async def authenticate():
         )
 
         print(
-            "[LOGIN] Existing session reused."
+            "[LOGIN] Existing StringSession reused."
         )
 
         return
+
+    # --------------------------------------------------------
+    # NEW LOGIN
+    # --------------------------------------------------------
 
     print(
         "[LOGIN] Session is not authorized."
@@ -383,6 +494,31 @@ async def authenticate():
 
     print(
         "[LOGIN] Authentication successful."
+    )
+
+    # --------------------------------------------------------
+    # FIRST SETUP ONLY
+    # --------------------------------------------------------
+    #
+    # Copy the value between NEW_SESSION_STRING and END
+    # into Render Environment Variable:
+    #
+    # TELEGRAM_SESSION
+    #
+    # DO NOT send the value to anyone.
+    #
+    # --------------------------------------------------------
+
+    print(
+        "[SESSION] NEW_SESSION_STRING:"
+    )
+
+    print(
+        client.session.save()
+    )
+
+    print(
+        "[SESSION] END"
     )
 
 
@@ -573,6 +709,7 @@ async def create_reply(event):
         return
 
     response = match.group(1).strip()
+
     trigger = match.group(2).strip()
 
     if event.chat_id not in reply_rules:
