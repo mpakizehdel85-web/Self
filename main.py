@@ -1529,3 +1529,440 @@ if __name__ == "__main__":
         )
 
         raise
+# ============================================================
+# FIXED .FISH COMMAND
+# این بخش را فقط به انتهای main.py اضافه کن
+# ============================================================
+
+# حذف هندلر قدیمی .fish تا دو نسخه همزمان اجرا نشوند
+try:
+    client.remove_event_handler(start_fish_loop)
+    print("[FISH] Old .fish handler removed.")
+except Exception as error:
+    print("[FISH] Could not remove old handler:", error)
+
+
+def normalize_button_text(text):
+    """
+    برای مقایسه دقیق‌تر متن دکمه و متن توضیحات.
+    فاصله‌ها و Variation Selector را حذف می‌کند.
+    """
+    if not text:
+        return ""
+
+    text = str(text)
+
+    # حذف Variation Selector-16
+    text = text.replace("\ufe0f", "")
+
+    # حذف فاصله‌های مختلف
+    text = re.sub(r"\s+", "", text)
+
+    return text
+
+
+def find_raw_fish_button(message):
+    """
+    متن پیام یخچال را می‌خواند.
+    
+    مثلاً اگر در توضیحات باشد:
+        🐟 | ماهی (خام)
+    
+    و دکمه‌ها باشند:
+        ⭐   🥘   🐟
+    
+    دکمه 🐟 را پیدا می‌کند.
+    """
+
+    if not message or not message.buttons:
+        return None
+
+    message_text = message.text or ""
+
+    if not message_text:
+        return None
+
+    # --------------------------------------------------------
+    # پیدا کردن خطی که «خام» دارد
+    # --------------------------------------------------------
+
+    raw_lines = []
+
+    for line in message_text.splitlines():
+        if "خام" in line:
+            raw_lines.append(line)
+
+    if not raw_lines:
+        print("[FISH] هیچ آیتم خامی در پیام پیدا نشد.")
+        return None
+
+    print("[FISH] Raw item lines:")
+    for line in raw_lines:
+        print("   ", repr(line))
+
+    # --------------------------------------------------------
+    # حالا تمام دکمه‌ها را بررسی می‌کنیم
+    # دکمه‌ای که متنش داخل خط «خام» باشد همان آیتم است.
+    # --------------------------------------------------------
+
+    for raw_line in raw_lines:
+
+        normalized_line = normalize_button_text(raw_line)
+
+        print("[FISH] Checking raw line:", repr(raw_line))
+
+        for row in message.buttons:
+            for button in row:
+
+                button_text = getattr(button, "text", "") or ""
+                normalized_button = normalize_button_text(button_text)
+
+                if not normalized_button:
+                    continue
+
+                print(
+                    "[FISH] Button:",
+                    repr(button_text),
+                    " | normalized:",
+                    repr(normalized_button)
+                )
+
+                # ------------------------------------------------
+                # مثال:
+                #
+                # متن:
+                # 🐟 ماهی (خام)
+                #
+                # دکمه:
+                # 🐟
+                #
+                # پس 🐟 داخل متن خط خام وجود دارد.
+                # ------------------------------------------------
+
+                if normalized_button in normalized_line:
+
+                    print(
+                        "[FISH] ✅ RAW FISH BUTTON FOUND:",
+                        repr(button_text)
+                    )
+
+                    return button
+
+    print("[FISH] ❌ دکمه مربوط به ماهی خام پیدا نشد.")
+    return None
+
+
+async def find_button_in_recent_messages(chat_id, finder, limit=8):
+    """
+    چند پیام آخر را بررسی می‌کند تا اگر پیام موردنظر
+    کمی عقب‌تر بود هم بتواند آن را پیدا کند.
+    """
+
+    async for message in client.iter_messages(chat_id, limit=limit):
+
+        try:
+            button = finder(message)
+
+            if button is not None:
+                return message, button
+
+        except Exception as error:
+            print("[FISH] Button search error:", error)
+
+    return None, None
+
+
+async def run_fish_workflow_fixed(chat_id):
+
+    try:
+
+        # ========================================================
+        # 1. ارسال «ماهی»
+        # ========================================================
+
+        print("[FISH] Sending: ماهی")
+
+        await client.send_message(chat_id, "ماهی")
+
+        await asyncio.sleep(4)
+
+        # ========================================================
+        # 2. پیدا کردن «بندازش تو یخچال»
+        # ========================================================
+
+        fridge_button = None
+        fridge_message = None
+
+        async for message in client.iter_messages(chat_id, limit=8):
+
+            if not message.buttons:
+                continue
+
+            for row in message.buttons:
+                for button in row:
+
+                    text = getattr(button, "text", "") or ""
+
+                    if "بندازش تو یخچال" in text:
+
+                        fridge_button = button
+                        fridge_message = message
+                        break
+
+                if fridge_button:
+                    break
+
+            if fridge_button:
+                break
+
+        if fridge_button:
+
+            print("[FISH] Clicking: بندازش تو یخچال")
+
+            await fridge_button.click()
+
+        else:
+
+            print("[FISH] ❌ دکمه «بندازش تو یخچال» پیدا نشد.")
+            return
+
+        # ========================================================
+        # 3. صبر برای یخچال
+        # ========================================================
+
+        await asyncio.sleep(4)
+
+        print("[FISH] Sending: یخچال میویی")
+
+        await client.send_message(chat_id, "یخچال میویی")
+
+        # کمی بیشتر صبر می‌کنیم تا پیام و دکمه‌ها کامل شوند
+        await asyncio.sleep(5)
+
+        # ========================================================
+        # 4. پیدا کردن ماهی‌ای که در توضیحاتش «خام» است
+        # ========================================================
+
+        print("[FISH] Searching for RAW fish...")
+
+        fridge_message = None
+        raw_fish_button = None
+
+        async def raw_fish_finder(message):
+            button = find_raw_fish_button(message)
+            return button
+
+        # پیام‌های آخر را بررسی می‌کنیم
+        async for message in client.iter_messages(chat_id, limit=10):
+
+            if not message.buttons:
+                continue
+
+            button = find_raw_fish_button(message)
+
+            if button is not None:
+
+                fridge_message = message
+                raw_fish_button = button
+                break
+
+        # ========================================================
+        # اگر ماهی خام پیدا نشد
+        # ========================================================
+
+        if raw_fish_button is None:
+
+            print("[FISH] ❌ Could not find raw fish button.")
+
+            # برای دیباگ، متن پیام‌های آخر را چاپ می‌کنیم
+            print("[FISH] Recent messages:")
+
+            async for message in client.iter_messages(chat_id, limit=5):
+
+                if message.text:
+                    print("--------------------------------")
+                    print(message.text)
+
+            return
+
+        # ========================================================
+        # 5. کلیک روی همان ماهی خام
+        # ========================================================
+
+        raw_button_text = getattr(raw_fish_button, "text", "")
+
+        print(
+            "[FISH] 🐟 Clicking RAW fish button:",
+            repr(raw_button_text)
+        )
+
+        await raw_fish_button.click()
+
+        # صبر برای باز شدن منوی ماهی
+        await asyncio.sleep(4)
+
+        # ========================================================
+        # 6. پیدا کردن «بپوخش»
+        # ========================================================
+
+        cook_button = None
+
+        async for message in client.iter_messages(chat_id, limit=8):
+
+            if not message.buttons:
+                continue
+
+            for row in message.buttons:
+                for button in row:
+
+                    text = getattr(button, "text", "") or ""
+
+                    if "بپوخش" in text:
+
+                        cook_button = button
+                        break
+
+                if cook_button:
+                    break
+
+            if cook_button:
+                break
+
+        if cook_button:
+
+            print("[FISH] 🍳 Clicking: بپوخش")
+
+            await cook_button.click()
+
+        else:
+
+            print("[FISH] ❌ دکمه «بپوخش» پیدا نشد.")
+            return
+
+        # ========================================================
+        # 7. صبر برای صفحه تأیید
+        # ========================================================
+
+        await asyncio.sleep(4)
+
+        # ========================================================
+        # 8. پیدا کردن دکمه تأیید
+        # ========================================================
+
+        confirm_button = None
+
+        async for message in client.iter_messages(chat_id, limit=8):
+
+            if not message.buttons:
+                continue
+
+            for row in message.buttons:
+                for button in row:
+
+                    text = getattr(button, "text", "") or ""
+
+                    # دکمه‌های احتمالی تأیید
+                    if any(
+                        x in text
+                        for x in [
+                            "✅",
+                            "تأیید",
+                            "تایید",
+                            "✔️",
+                            "✔"
+                        ]
+                    ):
+
+                        confirm_button = button
+                        break
+
+                if confirm_button:
+                    break
+
+            if confirm_button:
+                break
+
+        # ========================================================
+        # 9. تأیید نهایی
+        # ========================================================
+
+        if confirm_button:
+
+            print("[FISH] ✅ Clicking confirmation button.")
+
+            await confirm_button.click()
+
+            print("[FISH] 🎉 Fish cooking completed.")
+
+        else:
+
+            print("[FISH] ❌ Confirmation button not found.")
+
+    except asyncio.CancelledError:
+
+        print("[FISH] Task cancelled.")
+        raise
+
+    except Exception as error:
+
+        print("[FISH ERROR]", repr(error))
+
+
+# ============================================================
+# NEW .FISH HANDLER
+# ============================================================
+
+fish_task_running = None
+
+
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.fish$"))
+async def start_fish_loop_fixed(event):
+
+    global fish_task_running
+
+    chat_id = event.chat_id
+
+    # اگر قبلاً فعال بوده، متوقفش کن
+    if fish_task_running and not fish_task_running.done():
+
+        fish_task_running.cancel()
+
+        print("[FISH] Previous fish task cancelled.")
+
+    await event.edit("🎣 اتوماسیون ماهی فعال شد.")
+
+    async def loop_job():
+
+        while True:
+
+            print("======================================")
+            print("[FISH] Starting new fishing cycle")
+            print("======================================")
+
+            await run_fish_workflow_fixed(chat_id)
+
+            print("[FISH] Waiting 31 minutes...")
+
+            await asyncio.sleep(31 * 60)
+
+    fish_task_running = asyncio.create_task(loop_job())
+
+
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopfish$"))
+async def stop_fish_loop_fixed(event):
+
+    global fish_task_running
+
+    if fish_task_running and not fish_task_running.done():
+
+        fish_task_running.cancel()
+        fish_task_running = None
+
+        await event.edit("🛑 اتوماسیون ماهی متوقف شد.")
+
+    else:
+
+        await event.edit("❌ اتوماسیون ماهی فعالی وجود ندارد.")
+
+
+print("[FISH] Fixed .fish system loaded.")
