@@ -22,7 +22,6 @@ SESSION_PATH = Path("userbot")
 
 PORT = int(os.environ.get("PORT", "8000"))
 
-# متغیرهای سراسری برای نگهداری اطلاعات در حال دریافت
 bot_config = {
     "api_id": "",
     "api_hash": "",
@@ -36,7 +35,7 @@ code_queue = asyncio.Queue()
 password_queue = asyncio.Queue()
 config_queue = asyncio.Queue()
 
-login_state = "config" # شروع با وضعیت دریافت تنظیمات اولیه
+login_state = "config"
 login_message = "لطفاً مشخصات تلگرام خود را وارد کنید."
 
 
@@ -196,7 +195,7 @@ class LoginHandler(BaseHTTPRequestHandler):
                 "password_2fa": pwd
             }
             if MAIN_LOOP:
-                asyncio.run_coroutine_threadsafe(config_queue.put(cfg), MAIN_LOOP)
+                MAIN_LOOP.call_soon_threadsafe(config_queue.put_nowait, cfg)
             self.redirect()
             return
 
@@ -206,7 +205,7 @@ class LoginHandler(BaseHTTPRequestHandler):
                 self.send_error(HTTPStatus.BAD_REQUEST, "Invalid code")
                 return
             if MAIN_LOOP:
-                asyncio.run_coroutine_threadsafe(code_queue.put(code), MAIN_LOOP)
+                MAIN_LOOP.call_soon_threadsafe(code_queue.put_nowait, code)
             self.redirect()
             return
 
@@ -216,7 +215,7 @@ class LoginHandler(BaseHTTPRequestHandler):
                 self.send_error(HTTPStatus.BAD_REQUEST, "Password required")
                 return
             if MAIN_LOOP:
-                asyncio.run_coroutine_threadsafe(password_queue.put(password), MAIN_LOOP)
+                MAIN_LOOP.call_soon_threadsafe(password_queue.put_nowait, password)
             self.redirect()
             return
 
@@ -253,7 +252,6 @@ async def authenticate():
         except Exception:
             pass
 
-    # بررسی StringSession از متغیرهای محیطی رندر برای پایداری کامل
     env_session_string = os.environ.get("SESSION_STRING", "")
     session_file_exists = SESSION_PATH.exists() or Path("userbot.session").exists()
 
@@ -271,7 +269,6 @@ async def authenticate():
     PHONE = bot_config["phone"] if bot_config.get("phone") else ""
     PASSWORD_2FA = bot_config.get("password_2fa", "")
 
-    # مقداردهی کلاینت با پشتیبانی از StringSession
     if env_session_string:
         client = TelegramClient(
             StringSession(env_session_string),
@@ -302,7 +299,6 @@ async def authenticate():
     if await client.is_user_authorized():
         set_login_state("authenticated", "Existing Telegram session is valid.")
         print("[LOGIN] Existing session reused successfully.")
-        # اگر سشن با موفقیت لود شد، در صورت تمایل رشته سشن را برای ذخیره در رندر چاپ می‌کند
         try:
             print("[SESSION_STRING_BACKUP]", client.session.save())
         except Exception:
@@ -352,7 +348,6 @@ async def authenticate():
             password = await password_queue.get()
         await client.sign_in(password=password)
 
-    # پس از لاگین موفق، رشته سشن جدید را در کنسول چاپ می‌کند تا بتوانید آن را در رندر قرار دهید
     try:
         new_session_str = client.session.save()
         print("======================================")
@@ -385,12 +380,11 @@ def parse_interval(value):
 
 
 # ============================================================
-# EVENT HANDLERS REGISTRATION (All Old & New Features)
+# EVENT HANDLERS REGISTRATION
 # ============================================================
 
 def register_events(cli):
 
-    # ۱. دستورات زمان‌بندی پیام (.set)
     @cli.on(events.NewMessage(outgoing=True, pattern=r"^\.set(?:\s|$)"))
     async def set_scheduled_messages(event):
         match = re.fullmatch(r"\.set\s+(\d+)\s+(.+?)\s+(\d+(?:\.\d+)?[smh]?)", event.raw_text.strip(), re.IGNORECASE)
@@ -416,8 +410,6 @@ def register_events(cli):
         except Exception as error:
             await event.edit(f"❌ خطا: {type(error).__name__}: {error}")
 
-
-    # ۲. ریپلای خودکار (.reply و .stopreply)
     reply_rules = {}
 
     @cli.on(events.NewMessage(outgoing=True, pattern=r"^\.reply(?:\s|$)"))
@@ -447,8 +439,6 @@ def register_events(cli):
         reply_rules.pop(event.chat_id, None)
         await event.edit("🛑 ریپلای خودکار متوقف شد.")
 
-
-    # ۳. حالت نجات پیشی (.cat و .stopcat)
     cat_chats = set()
 
     @cli.on(events.NewMessage(outgoing=True, pattern=r"^\.cat$"))
@@ -481,8 +471,6 @@ def register_events(cli):
     async def cat_edited_message(event):
         await check_cat_message(event.message)
 
-
-    # ۴. ابزارهای عمومی (.ping و .whoami)
     @cli.on(events.NewMessage(outgoing=True, pattern=r"^\.ping$"))
     async def ping(event):
         await event.edit("✅ Userbot is online.")
@@ -513,11 +501,9 @@ async def start_fish_loop(event):
     async def fish_worker():
         try:
             while chat_id in fish_tasks:
-                # ۱. ارسال کلمه ماهی
                 await client.send_message(chat_id, "ماهی")
                 await asyncio.sleep(3)
                 
-                # ۲. پیدا کردن و کلیک روی دکمه "بندازش تو یخچال"
                 async for message in client.iter_messages(chat_id, limit=2):
                     if message.buttons:
                         for row in message.buttons:
@@ -526,14 +512,10 @@ async def start_fish_loop(event):
                                     await btn.click()
                                     break
                 
-                # مکث چند ثانیه‌ای قبل از نوشتن "یخچال میویی"
                 await asyncio.sleep(4)
-                
-                # ۳. ارسال دستور "یخچال میویی" برای باز کردن یخچال
                 await client.send_message(chat_id, "یخچال میویی")
                 await asyncio.sleep(4)
                 
-                # ۴. انتخاب ماهی‌های خام در یخچال و کلیک روی دکمه "بپوخش"
                 async for message in client.iter_messages(chat_id, limit=2):
                     if message.buttons:
                         for row in message.buttons:
@@ -545,7 +527,6 @@ async def start_fish_loop(event):
                 
                 await asyncio.sleep(2)
 
-                # ۵. تایید نهایی در صفحه جدید (کلیک روی دکمه تیک ✅)
                 async for message in client.iter_messages(chat_id, limit=2):
                     if message.buttons:
                         for row in message.buttons:
@@ -555,7 +536,6 @@ async def start_fish_loop(event):
                                     await btn.click()
                                     break
 
-                # ۶. صبر کردن برای ۳۱ دقیقه بعدی (31 * 60 ثانیه)
                 for _ in range(31 * 60):
                     if chat_id not in fish_tasks:
                         break
@@ -591,7 +571,6 @@ async def check_all_bot_activities(event):
     
     status_lines = ["<b>🤖 گزارش جامع فعالیت‌های ربات:</b>\n"]
     
-    # بررسی وضعیت اتومیشن ماهی (.fish)
     if fish_tasks:
         status_lines.append("<b>🐟 اتومیشن ماهی (.fish):</b>")
         for cid in fish_tasks.keys():
@@ -601,7 +580,6 @@ async def check_all_bot_activities(event):
         
     status_lines.append("")
     
-    # بررسی کلی سایر تسک‌های فعال در حافظه
     active_globals = []
     for var_name, var_value in globals().items():
         if isinstance(var_value, dict) and var_value and var_name.endswith('_tasks') and var_name != 'fish_tasks':
