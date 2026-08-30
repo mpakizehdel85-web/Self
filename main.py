@@ -14,29 +14,25 @@ from telethon.errors import SessionPasswordNeededError
 from telethon.sessions import StringSession
 
 # ============================================================
-# SETTINGS & DYNAMIC CONFIG
+# SETTINGS & CONFIG
 # ============================================================
 
-CONFIG_FILE = Path(".bot_config.json")
 SESSION_PATH = Path("userbot")
-
 PORT = int(os.environ.get("PORT", "8000"))
 
-bot_config = {
-    "api_id": "",
-    "api_hash": "",
-    "phone": "",
-    "password_2fa": ""
-}
+# خواندن اطلاعات از متغیرهای محیطی رندر (Environment)
+API_ID = int(os.environ.get("API_ID", 0))
+API_HASH = os.environ.get("API_HASH", "")
+PHONE = os.environ.get("PHONE", "")
+PASSWORD_2FA = os.environ.get("PASSWORD_2FA", "")
 
 client = None
 MAIN_LOOP = None
 code_queue = asyncio.Queue()
 password_queue = asyncio.Queue()
-config_queue = asyncio.Queue()
 
-login_state = "config"
-login_message = "لطفاً مشخصات تلگرام خود را وارد کنید."
+login_state = "starting"
+login_message = "در حال اتصال به تلگرام و ارسال کد..."
 
 
 def set_login_state(state, message):
@@ -52,7 +48,7 @@ def page_template(content):
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Telegram Userbot Setup</title>
+<title>Telegram Userbot Verification</title>
 <style>
 body {{
     margin:0;
@@ -108,55 +104,38 @@ p {{ color:#b8c0cf; line-height:1.5; }}
 
 
 def login_page():
-    if login_state == "config":
-        return page_template("""
-<h2>Telegram Credentials</h2>
-<p>اطلاعات اکانت تلگرام خود را وارد کنید.</p>
-<form method="post" action="/config" autocomplete="off">
-<label>API ID</label>
-<input name="api_id" type="text" required>
-<label>API Hash</label>
-<input name="api_hash" type="text" required>
-<label>Phone Number (with +)</label>
-<input name="phone" type="text" placeholder="+989..." required>
-<label>2FA Password (optional)</label>
-<input name="password_2fa" type="password">
-<button type="submit">ذخیره و ادامه</button>
-</form>
-""")
-
     if login_state == "code":
         return page_template("""
-<h2>Telegram Login</h2>
-<p>کد یک‌بارمصرف تلگرام را وارد کن.</p>
+<h2>Telegram Login Code</h2>
+<p>کد تایید ارسال شده از تلگرام را وارد کنید:</p>
 <form method="post" action="/code" autocomplete="off">
 <label>Login Code</label>
 <input name="code" type="text" inputmode="numeric" autocomplete="one-time-code" required>
-<button type="submit">ورود</button>
+<button type="submit">ورود به ربات</button>
 </form>
 """)
 
     if login_state == "password":
         return page_template("""
 <h2>Two-Step Verification</h2>
-<p>رمز دو مرحله‌ای تلگرام را وارد کن.</p>
+<p>رمز عبور دو مرحله‌ای (2FA) خود را وارد کنید:</p>
 <form method="post" action="/password" autocomplete="off">
 <label>2FA Password</label>
 <input name="password" type="password" autocomplete="current-password" required>
-<button type="submit">ادامه</button>
+<button type="submit">تایید رمز</button>
 </form>
 """)
 
     if login_state == "authenticated":
         return page_template("""
-<h2>✅ Telegram Connected</h2>
-<p>Userbot با موفقیت متصل شده است.</p>
+<h2>✅ متصل شد</h2>
+<p>یوزربات با موفقیت به تلگرام متصل گردید و آماده به کار است.</p>
 """)
 
     return page_template(f"""
 <h2>Telegram Userbot</h2>
 <p>{html.escape(login_message)}</p>
-<meta http-equiv="refresh" content="2">
+<meta http-equiv="refresh" content="3">
 """)
 
 
@@ -178,43 +157,16 @@ class LoginHandler(BaseHTTPRequestHandler):
         body = self.rfile.read(length).decode("utf-8")
         values = parse_qs(body, keep_blank_values=True)
 
-        if self.path == "/config":
-            api_id = values.get("api_id", [""])[0].strip()
-            api_hash = values.get("api_hash", [""])[0].strip()
-            phone = values.get("phone", [""])[0].strip()
-            pwd = values.get("password_2fa", [""])[0]
-
-            if not api_id or not api_hash or not phone:
-                self.send_error(HTTPStatus.BAD_REQUEST, "Missing fields")
-                return
-
-            cfg = {
-                "api_id": api_id,
-                "api_hash": api_hash,
-                "phone": phone,
-                "password_2fa": pwd
-            }
-            if MAIN_LOOP:
-                MAIN_LOOP.call_soon_threadsafe(config_queue.put_nowait, cfg)
-            self.redirect()
-            return
-
         if self.path == "/code":
             code = values.get("code", [""])[0].strip()
-            if not code.isdigit():
-                self.send_error(HTTPStatus.BAD_REQUEST, "Invalid code")
-                return
-            if MAIN_LOOP:
+            if code and MAIN_LOOP:
                 MAIN_LOOP.call_soon_threadsafe(code_queue.put_nowait, code)
             self.redirect()
             return
 
         if self.path == "/password":
             password = values.get("password", [""])[0]
-            if not password:
-                self.send_error(HTTPStatus.BAD_REQUEST, "Password required")
-                return
-            if MAIN_LOOP:
+            if password and MAIN_LOOP:
                 MAIN_LOOP.call_soon_threadsafe(password_queue.put_nowait, password)
             self.redirect()
             return
@@ -233,7 +185,7 @@ class LoginHandler(BaseHTTPRequestHandler):
 def start_web_server():
     server = ThreadingHTTPServer(("0.0.0.0", PORT), LoginHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    print(f"[WEB] Login page: port {PORT}")
+    print(f"[WEB] Server running on port {PORT}")
     return server
 
 
@@ -242,106 +194,40 @@ def start_web_server():
 # ============================================================
 
 async def authenticate():
-    global client, bot_config
-
-    if CONFIG_FILE.exists():
-        import json
-        try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                bot_config = json.load(f)
-        except Exception:
-            pass
+    global client
 
     env_session_string = os.environ.get("SESSION_STRING", "")
-    session_file_exists = SESSION_PATH.exists() or Path("userbot.session").exists()
-
-    if not env_session_string and not session_file_exists and (not bot_config.get("api_id") or not bot_config.get("api_hash") or not bot_config.get("phone")):
-        while not bot_config.get("api_id") or not bot_config.get("api_hash") or not bot_config.get("phone"):
-            set_login_state("config", "لطفاً مشخصات را از طریق صفحه وب وارد کنید.")
-            print("[LOGIN] Waiting for credentials via web page...")
-            bot_config = await config_queue.get()
-            import json
-            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-                json.dump(bot_config, f)
-
-    API_ID = int(bot_config["api_id"]) if bot_config.get("api_id") else int(os.environ.get("API_ID", 0))
-    API_HASH = bot_config["api_hash"] if bot_config.get("api_hash") else os.environ.get("API_HASH", "")
-    PHONE = bot_config["phone"] if bot_config.get("phone") else ""
-    PASSWORD_2FA = bot_config.get("password_2fa", "")
 
     if env_session_string:
-        client = TelegramClient(
-            StringSession(env_session_string),
-            API_ID if API_ID != 0 else 123456,
-            API_HASH if API_HASH else "placeholder",
-            auto_reconnect=True,
-            connection_retries=None,
-            request_retries=5,
-            retry_delay=5,
-            flood_sleep_threshold=60,
-        )
+        client = TelegramClient(StringSession(env_session_string), API_ID, API_HASH, auto_reconnect=True)
     else:
-        client = TelegramClient(
-            str(SESSION_PATH),
-            API_ID if API_ID != 0 else 123456,
-            API_HASH if API_HASH else "placeholder",
-            auto_reconnect=True,
-            connection_retries=None,
-            request_retries=5,
-            retry_delay=5,
-            flood_sleep_threshold=60,
-        )
+        client = TelegramClient(str(SESSION_PATH), API_ID, API_HASH, auto_reconnect=True)
 
     register_events(client)
-
     await client.connect()
 
     if await client.is_user_authorized():
-        set_login_state("authenticated", "Existing Telegram session is valid.")
-        print("[LOGIN] Existing session reused successfully.")
+        set_login_state("authenticated", "سشن قبلی معتبر است و ربات متصل شد.")
+        print("[LOGIN] Session reused successfully.")
         try:
             print("[SESSION_STRING_BACKUP]", client.session.save())
         except Exception:
             pass
         return
 
-    if not PHONE:
-        set_login_state("config", "سشن منقضی شده است. لطفاً دوباره مشخصات را وارد کنید.")
-        bot_config = await config_queue.get()
-        import json
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(bot_config, f)
-        API_ID = int(bot_config["api_id"])
-        API_HASH = bot_config["api_hash"]
-        PHONE = bot_config["phone"]
-        PASSWORD_2FA = bot_config.get("password_2fa", "")
-        
-        await client.disconnect()
-        client = TelegramClient(
-            str(SESSION_PATH),
-            API_ID,
-            API_HASH,
-            auto_reconnect=True,
-            connection_retries=None,
-            request_retries=5,
-            retry_delay=5,
-            flood_sleep_threshold=60,
-        )
-        register_events(client)
-        await client.connect()
-
-    print("[LOGIN] Session is not authorized. Requesting login code...")
-    set_login_state("starting", "Requesting a new Telegram login code...")
+    set_login_state("starting", "در حال ارسال کد تایید به تلگرام...")
+    print("[LOGIN] Requesting login code...")
     await client.send_code_request(PHONE)
-    set_login_state("code", "Telegram login code requested.")
-    print("[LOGIN] Waiting for code...")
+    
+    set_login_state("code", "کد تایید ارسال شد. لطفاً در صفحه وب وارد کنید.")
+    print("[LOGIN] Waiting for code from web page...")
 
     code = await code_queue.get()
 
     try:
         await client.sign_in(phone=PHONE, code=code)
     except SessionPasswordNeededError:
-        set_login_state("password", "Telegram requires your 2FA password.")
+        set_login_state("password", "حساب شما دارای رمز دومرحله‌ای است.")
         if PASSWORD_2FA:
             password = PASSWORD_2FA
         else:
@@ -357,7 +243,7 @@ async def authenticate():
     except Exception:
         pass
 
-    set_login_state("authenticated", "Authentication successful.")
+    set_login_state("authenticated", "ورود موفقیت‌آمیز بود.")
     print("[LOGIN] Authentication successful.")
 
 
