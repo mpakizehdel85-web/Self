@@ -566,44 +566,18 @@ async def handle_autoreact(event):
 async def read_mentions(event):
 
     await event.edit(
-        "⏳ در حال سین کردن همه منشن‌ها..."
+        "⏳ در حال سین کردن منشن‌های این چت..."
     )
 
-    read_count = 0
-    failed_count = 0
-
     try:
-
-        async for dialog in client.iter_dialogs():
-
-            # فقط چت‌هایی که امکان خواندن پیام دارند
-            if not dialog.is_group and not dialog.is_channel and not dialog.is_user:
-                continue
-
-            try:
-
-                await client(
-                    functions.messages.ReadMentionsRequest(
-                        peer=dialog.entity
-                    )
-                )
-
-                read_count += 1
-
-            except Exception as error:
-
-                failed_count += 1
-
-                print(
-                    "[READMENTIONS ERROR]",
-                    dialog.name,
-                    error
-                )
+        await client(
+            functions.messages.ReadMentionsRequest(
+                peer=event.chat_id
+            )
+        )
 
         await event.edit(
-            "✅ همه منشن‌های قابل‌دسترسی سین شدند.\n\n"
-            f"📂 چت‌های بررسی‌شده: {read_count}\n"
-            f"⚠️ چت‌های دارای خطا: {failed_count}"
+            "✅ منشن‌های این چت با موفقیت سین شدند."
         )
 
     except Exception as error:
@@ -614,7 +588,7 @@ async def read_mentions(event):
         )
 
         await event.edit(
-            f"❌ خطا در سین کردن منشن‌ها:\n{error}"
+            f"❌ خطا در سین کردن منشن‌های این چت:\n{error}"
         )
 
 # ============================================================
