@@ -7,12 +7,11 @@ import time
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlparse
 
-from telethon import TelegramClient, events
+from telethon import TelegramClient, events, functions, types
 from telethon.errors import SessionPasswordNeededError
 from telethon.sessions import StringSession
-
 
 # ============================================================
 # SETTINGS
@@ -33,7 +32,6 @@ PORT = int(os.environ.get("PORT", "8000"))
 
 START_TIME = time.time()
 
-
 # ============================================================
 # TELEGRAM CLIENT
 # ============================================================
@@ -47,7 +45,6 @@ else:
     print("[SESSION] Starting with a new temporary StringSession.")
     SESSION = StringSession()
 
-
 client = TelegramClient(
     SESSION,
     API_ID,
@@ -58,7 +55,6 @@ client = TelegramClient(
     retry_delay=5,
     flood_sleep_threshold=60,
 )
-
 
 # ============================================================
 # LOGIN WEB PAGE
@@ -254,7 +250,6 @@ class LoginHandler(BaseHTTPRequestHandler):
 
         self.wfile.write(body)
 
-
     def do_POST(self):
 
         length = int(
@@ -272,7 +267,6 @@ class LoginHandler(BaseHTTPRequestHandler):
             body,
             keep_blank_values=True
         )
-
 
         # ====================================================
         # LOGIN CODE
@@ -294,7 +288,6 @@ class LoginHandler(BaseHTTPRequestHandler):
 
                 return
 
-
             if MAIN_LOOP:
 
                 asyncio.run_coroutine_threadsafe(
@@ -302,11 +295,9 @@ class LoginHandler(BaseHTTPRequestHandler):
                     MAIN_LOOP
                 )
 
-
             self.redirect()
 
             return
-
 
         # ====================================================
         # 2FA PASSWORD
@@ -319,7 +310,6 @@ class LoginHandler(BaseHTTPRequestHandler):
                 [""]
             )[0]
 
-
             if not password:
 
                 self.send_error(
@@ -329,7 +319,6 @@ class LoginHandler(BaseHTTPRequestHandler):
 
                 return
 
-
             if MAIN_LOOP:
 
                 asyncio.run_coroutine_threadsafe(
@@ -337,16 +326,13 @@ class LoginHandler(BaseHTTPRequestHandler):
                     MAIN_LOOP
                 )
 
-
             self.redirect()
 
             return
 
-
         self.send_error(
             HTTPStatus.NOT_FOUND
         )
-
 
     def redirect(self):
 
@@ -360,7 +346,6 @@ class LoginHandler(BaseHTTPRequestHandler):
         )
 
         self.end_headers()
-
 
     def log_message(self, format, *args):
         return
@@ -393,7 +378,6 @@ async def authenticate():
 
     await client.connect()
 
-
     # --------------------------------------------------------
     # EXISTING SESSION
     # --------------------------------------------------------
@@ -411,7 +395,6 @@ async def authenticate():
 
         return
 
-
     # --------------------------------------------------------
     # NO VALID SESSION
     # --------------------------------------------------------
@@ -425,11 +408,9 @@ async def authenticate():
         "Requesting a new Telegram login code..."
     )
 
-
     await client.send_code_request(
         PHONE
     )
-
 
     set_login_state(
         "code",
@@ -440,9 +421,7 @@ async def authenticate():
         "[LOGIN] Waiting for login code..."
     )
 
-
     code = await code_queue.get()
-
 
     # --------------------------------------------------------
     # SIGN IN WITH CODE
@@ -466,7 +445,6 @@ async def authenticate():
             "Telegram requires your 2FA password."
         )
 
-
         if PASSWORD_2FA:
 
             password = PASSWORD_2FA
@@ -475,11 +453,9 @@ async def authenticate():
 
             password = await password_queue.get()
 
-
         await client.sign_in(
             password=password
         )
-
 
     # --------------------------------------------------------
     # SUCCESS
@@ -504,6 +480,218 @@ async def authenticate():
 
 
 # ============================================================
+# DYNAMIC FEATURE REGISTRY
+# ============================================================
+#
+# هر قابلیت جدید باید اینجا ثبت شود.
+# .info و .status از همین اطلاعات استفاده می‌کنند.
+#
+
+FEATURES = {}
+
+
+def register_feature(
+    command,
+    description,
+    category="general"
+):
+
+    FEATURES[command] = {
+        "description": description,
+        "category": category,
+    }
+
+
+# ============================================================
+# CHAT / USER HELPERS
+# ============================================================
+
+def get_chat_title(entity):
+
+    if entity is None:
+        return "Unknown Chat"
+
+    title = getattr(
+        entity,
+        "title",
+        None
+    )
+
+    if title:
+        return title
+
+    first_name = getattr(
+        entity,
+        "first_name",
+        None
+    )
+
+    last_name = getattr(
+        entity,
+        "last_name",
+        None
+    )
+
+    name = " ".join(
+        x for x in [
+            first_name,
+            last_name
+        ]
+        if x
+    ).strip()
+
+    if name:
+        return name
+
+    username = getattr(
+        entity,
+        "username",
+        None
+    )
+
+    if username:
+        return f"@{username}"
+
+    return str(
+        getattr(
+            entity,
+            "id",
+            "Unknown"
+        )
+    )
+
+
+async def get_chat_display(chat_id):
+
+    try:
+
+        entity = await client.get_entity(
+            chat_id
+        )
+
+        title = get_chat_title(
+            entity
+        )
+
+        username = getattr(
+            entity,
+            "username",
+            None
+        )
+
+        if username:
+
+            return f"{title} (@{username})"
+
+        # لینک عمومی بعضی کانال‌ها/گروه‌ها
+        if getattr(entity, "megagroup", False):
+            pass
+
+        return title
+
+    except Exception:
+
+        return str(chat_id)
+
+
+async def resolve_user(value):
+
+    value = value.strip()
+
+    # حذف @ در صورت وجود
+    if value.startswith("@"):
+        value = value[1:]
+
+    try:
+
+        return await client.get_entity(
+            value
+        )
+
+    except Exception:
+
+        try:
+
+            if value.isdigit():
+
+                return await client.get_entity(
+                    int(value)
+                )
+
+        except Exception:
+
+            pass
+
+    return None
+
+
+def user_display_name(user):
+
+    username = getattr(
+        user,
+        "username",
+        None
+    )
+
+    if username:
+        return f"@{username}"
+
+    first_name = getattr(
+        user,
+        "first_name",
+        None
+    ) or ""
+
+    last_name = getattr(
+        user,
+        "last_name",
+        None
+    ) or ""
+
+    name = (
+        f"{first_name} {last_name}"
+    ).strip()
+
+    if name:
+        return name
+
+    return "کاربر"
+
+
+def user_mention(user):
+
+    name = user_display_name(
+        user
+    )
+
+    if getattr(user, "username", None):
+
+        return f"@{user.username}"
+
+    user_id = getattr(
+        user,
+        "id",
+        None
+    )
+
+    if user_id:
+
+        safe_name = html.escape(
+            name
+        )
+
+        return (
+            f'<a href="tg://user?id={user_id}">'
+            f'{safe_name}'
+            f'</a>'
+        )
+
+    return html.escape(
+        name
+    )
+
+
+# ============================================================
 # .SESSION
 # ============================================================
 
@@ -517,9 +705,7 @@ async def send_session(event):
 
     try:
 
-        # گرفتن StringSession فعلی
         session_string = client.session.save()
-
 
         if not session_string:
 
@@ -529,24 +715,19 @@ async def send_session(event):
 
             return
 
-
-        # ارسال Session فقط به Saved Messages
         await client.send_message(
             "me",
             session_string
         )
-
 
         await event.edit(
             "✅ TELEGRAM_SESSION در Saved Messages ارسال شد.\n\n"
             "🔐 این متن را مثل رمز اکانت نگه دار."
         )
 
-
         print(
             "[SESSION] TELEGRAM_SESSION sent to Saved Messages."
         )
-
 
     except Exception as error:
 
@@ -558,6 +739,13 @@ async def send_session(event):
         await event.edit(
             f"❌ خطا در دریافت Session:\n{error}"
         )
+
+
+register_feature(
+    ".session",
+    "دریافت Session",
+    "account"
+)
 
 
 # ============================================================
@@ -590,7 +778,6 @@ def parse_interval(value):
         if unit == "h":
             return number * 3600
 
-
     if re.fullmatch(
         r"\d+(?:\.\d+)?",
         value
@@ -598,13 +785,15 @@ def parse_interval(value):
 
         return float(value) * 60
 
-
     return None
 
 
 # ============================================================
 # .SET
 # ============================================================
+
+scheduled_messages = {}
+
 
 @client.on(
     events.NewMessage(
@@ -620,7 +809,6 @@ async def set_scheduled_messages(event):
         re.IGNORECASE
     )
 
-
     if not match:
 
         await event.edit(
@@ -630,7 +818,6 @@ async def set_scheduled_messages(event):
         )
 
         return
-
 
     count = int(
         match.group(1)
@@ -644,7 +831,6 @@ async def set_scheduled_messages(event):
         interval_text
     )
 
-
     if (
         count <= 0
         or interval is None
@@ -657,13 +843,11 @@ async def set_scheduled_messages(event):
 
         return
 
-
     now = datetime.now(
         timezone.utc
     )
 
     scheduled = 0
-
 
     try:
 
@@ -679,7 +863,6 @@ async def set_scheduled_messages(event):
                 )
             )
 
-
             await client.send_message(
                 event.chat_id,
                 message_text,
@@ -688,17 +871,29 @@ async def set_scheduled_messages(event):
 
             scheduled += 1
 
+        scheduled_messages[event.chat_id] = (
+            scheduled_messages.get(
+                event.chat_id,
+                0
+            ) + scheduled
+        )
 
         await event.edit(
             f"✅ {scheduled} پیام زمان‌بندی شد."
         )
-
 
     except Exception as error:
 
         await event.edit(
             f"❌ خطا: {error}"
         )
+
+
+register_feature(
+    ".set",
+    "زمان‌بندی پیام",
+    "automation"
+)
 
 
 # ============================================================
@@ -722,7 +917,6 @@ async def create_reply(event):
         re.IGNORECASE
     )
 
-
     if not match:
 
         await event.edit(
@@ -732,23 +926,19 @@ async def create_reply(event):
 
         return
 
-
     response = match.group(1).strip()
 
     trigger = match.group(2).strip()
 
-
     if event.chat_id not in reply_rules:
 
         reply_rules[event.chat_id] = {}
-
 
     reply_rules[
         event.chat_id
     ][
         trigger.casefold()
     ] = response
-
 
     await event.edit(
         f"✅ ریپلای فعال شد\n"
@@ -763,23 +953,18 @@ async def automatic_reply(event):
     if event.out or event.reply_to_msg_id:
         return
 
-
     chat_id = event.chat_id
-
 
     if chat_id not in reply_rules:
         return
 
-
     incoming = event.raw_text.strip()
-
 
     response = reply_rules[
         chat_id
     ].get(
         incoming.casefold()
     )
-
 
     if response:
 
@@ -810,6 +995,19 @@ async def stop_reply(event):
     await event.edit(
         "🛑 ریپلای خودکار متوقف شد."
     )
+
+
+register_feature(
+    ".reply",
+    "ریپلای خودکار",
+    "automation"
+)
+
+register_feature(
+    ".stopreply",
+    "توقف ریپلای خودکار",
+    "automation"
+)
 
 
 # ============================================================
@@ -861,7 +1059,6 @@ async def check_cat_message(message):
     ):
         return
 
-
     for row in message.buttons:
 
         for button in row:
@@ -871,7 +1068,6 @@ async def check_cat_message(message):
                 "text",
                 ""
             )
-
 
             if (
                 text
@@ -919,32 +1115,54 @@ async def cat_edited_message(event):
     )
 
 
+register_feature(
+    ".cat",
+    "نجات خودکار پیشی",
+    "automation"
+)
+
+register_feature(
+    ".stopcat",
+    "توقف نجات پیشی",
+    "automation"
+)
+
+
 # ============================================================
-# .PURGE
+# .DELETE
 # ============================================================
 
 @client.on(
     events.NewMessage(
         outgoing=True,
-        pattern=r"^\.purge(?:\s+(\d+))?$"
+        pattern=r"^\.delete(?:\s+(\d+))?$"
     )
 )
-async def purge_messages(event):
+async def delete_messages(event):
 
     match = event.pattern_match
 
     count = (
         int(match.group(1))
         if match.group(1)
-        else 10
+        else 1
     )
+
+    if count <= 0:
+
+        await event.edit(
+            "❌ تعداد باید بیشتر از صفر باشد."
+        )
+
+        return
 
     deleted = 0
 
-
+    # خود دستور هم جزو پیام‌های خود کاربر است
+    # ابتدا پیام‌های اخیر خودمان را پیدا می‌کنیم.
     async for message in client.iter_messages(
         event.chat_id,
-        limit=count,
+        limit=count + 1,
         from_user="me"
     ):
 
@@ -958,10 +1176,15 @@ async def purge_messages(event):
 
             pass
 
+        if deleted >= count:
+            break
 
-    print(
-        f"[PURGE] Deleted {deleted} messages."
-    )
+
+register_feature(
+    ".delete",
+    "حذف تعداد مشخصی از پیام‌ها",
+    "messages"
+)
 
 
 # ============================================================
@@ -984,19 +1207,23 @@ async def save_message(event):
 
         return
 
-
     reply_msg = await event.get_reply_message()
-
 
     await client.forward_messages(
         "me",
         reply_msg
     )
 
-
     await event.edit(
         "✅ پیام در Saved Messages ذخیره شد."
     )
+
+
+register_feature(
+    ".save",
+    "ذخیره پیام در Saved Messages",
+    "messages"
+)
 
 
 # ============================================================
@@ -1025,7 +1252,6 @@ async def uptime_bot(event):
         60
     )
 
-
     await event.edit(
         f"⏱ **آب‌تایم بات:** "
         f"{hours} ساعت و "
@@ -1034,11 +1260,498 @@ async def uptime_bot(event):
     )
 
 
+register_feature(
+    ".uptime",
+    "نمایش زمان فعالیت سلف‌بات",
+    "system"
+)
+
+
 # ============================================================
-# .FISH
+# REACTION AUTOMATION DATA
 # ============================================================
 
-fish_task_running = None
+reaction_rules = {}
+
+
+def ensure_reaction_chat(chat_id):
+
+    if chat_id not in reaction_rules:
+        reaction_rules[chat_id] = []
+
+
+def reaction_rule_matches(rule, event):
+
+    # پیام‌های خودمان را نادیده می‌گیریم
+    if event.out:
+        return False
+
+    message = event.message
+
+    # اگر شخص مشخص شده باشد
+    target_user_id = rule.get(
+        "user_id"
+    )
+
+    if target_user_id is not None:
+
+        sender_id = getattr(
+            message,
+            "sender_id",
+            None
+        )
+
+        if sender_id != target_user_id:
+            return False
+
+    # اگر متن مشخص شده باشد
+    target_text = rule.get(
+        "text"
+    )
+
+    if target_text:
+
+        incoming = (
+            message.raw_text or ""
+        ).strip()
+
+        if incoming.casefold() != target_text.casefold():
+            return False
+
+    return True
+
+
+async def apply_reaction_rule(
+    event,
+    rule
+):
+
+    try:
+
+        if not reaction_rule_matches(
+            rule,
+            event
+        ):
+            return
+
+        emoji = rule["emoji"]
+
+        await event.message.react(
+            emoji
+        )
+
+        print(
+            "[REACTION] Reacted:",
+            emoji,
+            "chat:",
+            event.chat_id,
+            "message:",
+            event.message.id
+        )
+
+    except Exception as error:
+
+        print(
+            "[REACTION ERROR]",
+            error
+        )
+
+
+@client.on(
+    events.NewMessage()
+)
+async def automatic_reaction(event):
+
+    chat_id = event.chat_id
+
+    rules = reaction_rules.get(
+        chat_id,
+        []
+    )
+
+    if not rules:
+        return
+
+    for rule in list(rules):
+
+        await apply_reaction_rule(
+            event,
+            rule
+        )
+
+
+# ============================================================
+# .REACTION
+# ============================================================
+
+@client.on(
+    events.NewMessage(
+        outgoing=True,
+        pattern=r"^\.reaction(?:\s|$)?"
+    )
+)
+async def create_reaction_rule(event):
+
+    raw = event.raw_text.strip()
+
+    # --------------------------------------------------------
+    # فرمت‌ها:
+    #
+    # .reaction @username ❤️
+    # .reaction متن ❤️
+    # .reaction @username متن ❤️
+    #
+    # برای تشخیص بهتر، ایموجی آخر دستور در نظر گرفته می‌شود.
+    # --------------------------------------------------------
+
+    match = re.fullmatch(
+        r"\.reaction\s+(.+?)\s+(\S+)$",
+        raw,
+        re.DOTALL
+    )
+
+    if not match:
+
+        await event.edit(
+            "❌ فرمت:\n\n"
+            ".reaction @username ❤️\n"
+            ".reaction متن ❤️\n"
+            ".reaction @username متن ❤️"
+        )
+
+        return
+
+    target = match.group(1).strip()
+
+    emoji = match.group(2).strip()
+
+    if not emoji:
+
+        await event.edit(
+            "❌ ایموجی ری‌اکشن مشخص نشده."
+        )
+
+        return
+
+    user = None
+
+    # --------------------------------------------------------
+    # اگر اولین بخش @ یا ID باشد،
+    # آن را به‌عنوان شخص در نظر می‌گیریم.
+    # --------------------------------------------------------
+
+    parts = target.split(
+        maxsplit=1
+    )
+
+    possible_user = parts[0]
+
+    if (
+        possible_user.startswith("@")
+        or possible_user.isdigit()
+    ):
+
+        user = await resolve_user(
+            possible_user
+        )
+
+        if user:
+
+            text = (
+                parts[1].strip()
+                if len(parts) > 1
+                else None
+            )
+
+        else:
+
+            text = target
+
+    else:
+
+        text = target
+
+    rule = {
+        "user_id": (
+            getattr(user, "id", None)
+            if user
+            else None
+        ),
+        "user_name": (
+            user_display_name(user)
+            if user
+            else None
+        ),
+        "text": text,
+        "emoji": emoji,
+        "created_at": datetime.now(
+            timezone.utc
+        ).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        ),
+    }
+
+    ensure_reaction_chat(
+        event.chat_id
+    )
+
+    # جلوگیری از ثبت دقیقاً همان قانون
+    for old_rule in reaction_rules[
+        event.chat_id
+    ]:
+
+        if (
+            old_rule.get("user_id")
+            == rule.get("user_id")
+            and old_rule.get("text")
+            == rule.get("text")
+            and old_rule.get("emoji")
+            == rule.get("emoji")
+        ):
+
+            await event.edit(
+                "⚠️ این قانون قبلاً فعال است."
+            )
+
+            return
+
+    reaction_rules[
+        event.chat_id
+    ].append(
+        rule
+    )
+
+    target_description = ""
+
+    if user:
+
+        target_description = (
+            f"👤 شخص: {user_display_name(user)}"
+        )
+
+    if text:
+
+        if target_description:
+            target_description += "\n"
+
+        target_description += (
+            f"📝 متن: {text}"
+        )
+
+    if not target_description:
+
+        target_description = "همه پیام‌ها"
+
+    await event.edit(
+        "✅ ری‌اکشن خودکار فعال شد.\n\n"
+        f"{target_description}\n"
+        f"❤️ ری‌اکشن: {emoji}"
+    )
+
+
+register_feature(
+    ".reaction",
+    "ری‌اکشن خودکار بر اساس شخص و/یا متن",
+    "automation"
+)
+
+
+# ============================================================
+# .STOPREACTION
+# ============================================================
+
+@client.on(
+    events.NewMessage(
+        outgoing=True,
+        pattern=r"^\.stopreaction$"
+    )
+)
+async def stop_reaction(event):
+
+    if event.chat_id not in reaction_rules:
+
+        await event.edit(
+            "❌ در این چت قانون ری‌اکشنی فعال نیست."
+        )
+
+        return
+
+    removed = len(
+        reaction_rules.pop(
+            event.chat_id
+        )
+    )
+
+    await event.edit(
+        f"🛑 {removed} قانون ری‌اکشن "
+        f"در این چت متوقف شد."
+    )
+
+
+register_feature(
+    ".stopreaction",
+    "توقف ری‌اکشن خودکار در چت",
+    "automation"
+)
+
+
+# ============================================================
+# .REACTIONS
+# ============================================================
+
+@client.on(
+    events.NewMessage(
+        outgoing=True,
+        pattern=r"^\.reactions$"
+    )
+)
+async def show_reaction_rules(event):
+
+    rules = reaction_rules.get(
+        event.chat_id,
+        []
+    )
+
+    if not rules:
+
+        await event.edit(
+            "📭 در این چت هیچ قانون ری‌اکشنی فعال نیست."
+        )
+
+        return
+
+    lines = [
+        "📋 قوانین ری‌اکشن این چت:\n"
+    ]
+
+    for index, rule in enumerate(
+        rules,
+        1
+    ):
+
+        target = []
+
+        if rule.get("user_name"):
+            target.append(
+                f"👤 {rule['user_name']}"
+            )
+
+        if rule.get("text"):
+            target.append(
+                f"📝 {rule['text']}"
+            )
+
+        if not target:
+            target_text = "همه پیام‌ها"
+        else:
+            target_text = " | ".join(
+                target
+            )
+
+        lines.append(
+            f"{index}. {target_text} → "
+            f"{rule['emoji']}"
+        )
+
+    await event.edit(
+        "\n".join(lines)
+    )
+
+
+register_feature(
+    ".reactions",
+    "نمایش قوانین ری‌اکشن فعال",
+    "automation"
+)
+
+
+# ============================================================
+# FISH DATA
+# ============================================================
+
+fish_tasks = {}
+
+
+def is_fish_legendary(text):
+
+    if not text:
+        return False
+
+    normalized = text.casefold()
+
+    legendary_words = [
+        "افسانه‌ای",
+        "افسانه ای",
+        "افسانهای",
+        "legendary",
+        "لجندری",
+    ]
+
+    return any(
+        word.casefold() in normalized
+        for word in legendary_words
+    )
+
+
+async def click_button_containing(
+    message,
+    text
+):
+
+    if not message.buttons:
+        return False
+
+    for row in message.buttons:
+
+        for button in row:
+
+            button_text = getattr(
+                button,
+                "text",
+                ""
+            ) or ""
+
+            if text in button_text:
+
+                try:
+
+                    await button.click()
+
+                    return True
+
+                except Exception as error:
+
+                    print(
+                        "[BUTTON ERROR]",
+                        error
+                    )
+
+                    return False
+
+    return False
+
+
+async def find_latest_fish_message(
+    chat_id
+):
+
+    async for message in client.iter_messages(
+        chat_id,
+        limit=5
+    ):
+
+        text = (
+            message.text or ""
+        )
+
+        if (
+            "ماهی" in text
+            and message.buttons
+        ):
+
+            return message
+
+    return None
 
 
 async def run_fish_workflow(
@@ -1048,209 +1761,166 @@ async def run_fish_workflow(
 
     try:
 
-        # ۱. ارسال دستور ماهی
-        await client.send_message(
+        # ----------------------------------------------------
+        # فقط دستور ماهی
+        # ----------------------------------------------------
+
+        sent = await client.send_message(
             chat_id,
             "ماهی"
         )
 
-        await asyncio.sleep(4)
-
-
-        # ۲. کلیک روی «بندازش تو یخچال»
-
-        async for message in client.iter_messages(
-            chat_id,
-            limit=3
-        ):
-
-            if message.buttons:
-
-                for row in message.buttons:
-
-                    for button in row:
-
-                        if (
-                            "بندازش تو یخچال"
-                            in getattr(
-                                button,
-                                "text",
-                                ""
-                            )
-                        ):
-
-                            await button.click()
-
-                            break
-
-                    else:
-                        continue
-
-                    break
-
-                break
-
-
-        # ۳. صبر ۶۰ ثانیه
-
-        await asyncio.sleep(60)
-
-
-        # ۴. ارسال دستور یخچال
-
-        await client.send_message(
-            chat_id,
-            "یخچال میویی"
+        print(
+            "[FISH] Sent ماهی:",
+            sent.id
         )
 
+        # ----------------------------------------------------
+        # صبر برای نتیجه بازی
+        # ----------------------------------------------------
+
         await asyncio.sleep(4)
 
+        fish_message = (
+            await find_latest_fish_message(
+                chat_id
+            )
+        )
 
-        # ۵. پیدا کردن ماهی خام
+        if not fish_message:
 
-        async for message in client.iter_messages(
-            chat_id,
-            limit=3
+            print(
+                "[FISH] Result message not found."
+            )
+
+            return
+
+        fish_text = (
+            fish_message.text or ""
+        )
+
+        print(
+            "[FISH] Result:",
+            fish_text[:300]
+        )
+
+        # ----------------------------------------------------
+        # ماهی افسانه‌ای → یخچال
+        # ماهی عادی → فروش
+        # ----------------------------------------------------
+
+        if is_fish_legendary(
+            fish_text
         ):
 
-            if (
-                message.text
-                and message.buttons
-            ):
+            print(
+                "[FISH] Legendary fish detected."
+            )
 
-                lines = message.text.split(
-                    "\n"
+            clicked = (
+                await click_button_containing(
+                    fish_message,
+                    "یخچال"
                 )
+            )
 
-                target_button_text = None
+            if not clicked:
 
+                # اگر دکمه نتیجه در پیام بعدی ظاهر شد
+                await asyncio.sleep(2)
 
-                for row in message.buttons:
+                async for message in client.iter_messages(
+                    chat_id,
+                    limit=5
+                ):
 
-                    for button in row:
+                    if await click_button_containing(
+                        message,
+                        "یخچال"
+                    ):
 
-                        btn_text = getattr(
-                            button,
-                            "text",
-                            ""
-                        )
-
-
-                        for line in lines:
-
-                            if (
-                                btn_text in line
-                                and "خام" in line
-                            ):
-
-                                await button.click()
-
-                                target_button_text = btn_text
-
-                                break
-
-
-                        if target_button_text:
-                            break
-
-
-                    if target_button_text:
+                        clicked = True
                         break
 
+            if clicked:
 
-                break
+                print(
+                    "[FISH] Legendary fish stored in refrigerator."
+                )
 
+            else:
 
-        # ۶. بپوخش
+                print(
+                    "[FISH] Refrigerator button not found."
+                )
 
-        await asyncio.sleep(4)
+        else:
 
+            print(
+                "[FISH] Normal fish detected."
+            )
 
-        async for message in client.iter_messages(
-            chat_id,
-            limit=3
-        ):
+            clicked = (
+                await click_button_containing(
+                    fish_message,
+                    "فروش"
+                )
+            )
 
-            if message.buttons:
+            if not clicked:
 
-                for row in message.buttons:
+                await asyncio.sleep(2)
 
-                    for button in row:
+                async for message in client.iter_messages(
+                    chat_id,
+                    limit=5
+                ):
 
-                        if (
-                            "بپوخش"
-                            in getattr(
-                                button,
-                                "text",
-                                ""
-                            )
-                        ):
+                    if await click_button_containing(
+                        message,
+                        "فروش"
+                    ):
 
-                            await button.click()
+                        clicked = True
+                        break
 
-                            break
+            if clicked:
 
-                    else:
-                        continue
+                print(
+                    "[FISH] Normal fish sold."
+                )
 
-                    break
+            else:
 
-                break
+                print(
+                    "[FISH] Sell button not found."
+                )
 
+    except asyncio.CancelledError:
 
-        # ۷. تایید نهایی
-
-        await asyncio.sleep(4)
-
-
-        async for message in client.iter_messages(
-            chat_id,
-            limit=3
-        ):
-
-            if message.buttons:
-
-                for row in message.buttons:
-
-                    for button in row:
-
-                        btn_txt = getattr(
-                            button,
-                            "text",
-                            ""
-                        )
-
-
-                        if (
-                            any(
-                                x in btn_txt
-                                for x in [
-                                    "🛠",
-                                    "✅",
-                                    "➕",
-                                    "تیک"
-                                ]
-                            )
-                            or len(btn_txt.strip()) == 0
-                        ):
-
-                            await button.click()
-
-                            break
-
-                    else:
-                        continue
-
-                    break
-
-                break
-
+        raise
 
     except Exception as error:
 
         print(
             "[FISH ERROR]",
             error
+        )
+
+
+async def fish_loop(
+    chat_id
+):
+
+    while True:
+
+        await run_fish_workflow(
+            client,
+            chat_id
+        )
+
+        await asyncio.sleep(
+            31 * 60
         )
 
 
@@ -1262,37 +1932,27 @@ async def run_fish_workflow(
 )
 async def start_fish_loop(event):
 
-    global fish_task_running
-
     chat_id = event.chat_id
 
-
-    await event.edit(
-        "🎣 اتوماسیون ماهی فعال شد (هر ۳۱ دقیقه)."
+    old_task = fish_tasks.get(
+        chat_id
     )
 
+    if old_task and not old_task.done():
 
-    async def loop_job():
+        old_task.cancel()
 
-        while True:
+    fish_tasks[
+        chat_id
+    ] = asyncio.create_task(
+        fish_loop(chat_id)
+    )
 
-            await run_fish_workflow(
-                client,
-                chat_id
-            )
-
-            await asyncio.sleep(
-                31 * 60
-            )
-
-
-    if fish_task_running:
-
-        fish_task_running.cancel()
-
-
-    fish_task_running = asyncio.create_task(
-        loop_job()
+    await event.edit(
+        "🎣 اتوماسیون ماهی فعال شد.\n"
+        "ماهی افسانه‌ای → یخچال\n"
+        "ماهی عادی → فروش\n"
+        "⏱ هر ۳۱ دقیقه"
     )
 
 
@@ -1304,15 +1964,14 @@ async def start_fish_loop(event):
 )
 async def stop_fish_loop(event):
 
-    global fish_task_running
+    task = fish_tasks.pop(
+        event.chat_id,
+        None
+    )
 
+    if task and not task.done():
 
-    if fish_task_running:
-
-        fish_task_running.cancel()
-
-        fish_task_running = None
-
+        task.cancel()
 
         await event.edit(
             "🛑 اتوماسیون ماهی متوقف شد."
@@ -1321,84 +1980,741 @@ async def stop_fish_loop(event):
     else:
 
         await event.edit(
-            "❌ هیچ اتوماسیونی فعالی وجود ندارد."
+            "❌ اتوماسیون ماهی در این چت فعال نیست."
         )
 
 
+register_feature(
+    ".fish",
+    "ماهی افسانه‌ای → یخچال / ماهی عادی → فروش",
+    "automation"
+)
+
+register_feature(
+    ".stopfish",
+    "توقف اتوماسیون ماهی",
+    "automation"
+)
+
+
 # ============================================================
-# .STATUS
+# REACTION LIST FROM CHANNEL POST
+# ============================================================
+
+def parse_telegram_message_link(
+    link
+):
+
+    link = link.strip()
+
+    parsed = urlparse(
+        link
+    )
+
+    if parsed.scheme not in (
+        "http",
+        "https"
+    ):
+
+        return None
+
+    host = (
+        parsed.netloc
+        .lower()
+        .split(":")[0]
+    )
+
+    if host not in (
+        "t.me",
+        "telegram.me"
+    ):
+
+        return None
+
+    parts = [
+        p for p in
+        parsed.path.split("/")
+        if p
+    ]
+
+    if len(parts) < 2:
+        return None
+
+    # لینک خصوصی:
+    # https://t.me/c/123456789/100
+    if parts[0] == "c":
+
+        if len(parts) < 3:
+            return None
+
+        try:
+
+            channel_id = int(
+                parts[1]
+            )
+
+            message_id = int(
+                parts[2]
+            )
+
+        except ValueError:
+
+            return None
+
+        return {
+            "kind": "private",
+            "channel_id": channel_id,
+            "message_id": message_id,
+        }
+
+    # لینک عمومی:
+    # https://t.me/channel/123
+    username = parts[0]
+
+    try:
+
+        message_id = int(
+            parts[1]
+        )
+
+    except ValueError:
+
+        return None
+
+    return {
+        "kind": "public",
+        "username": username,
+        "message_id": message_id,
+    }
+
+
+async def resolve_message_from_link(
+    link
+):
+
+    parsed = parse_telegram_message_link(
+        link
+    )
+
+    if not parsed:
+        return None, None
+
+    try:
+
+        if parsed["kind"] == "public":
+
+            entity = await client.get_entity(
+                parsed["username"]
+            )
+
+        else:
+
+            # ID لینک /c به Peer ID تبدیل می‌شود
+            peer_id = int(
+                "-100"
+                + str(
+                    parsed["channel_id"]
+                )
+            )
+
+            entity = await client.get_entity(
+                peer_id
+            )
+
+        message = await client.get_messages(
+            entity,
+            ids=parsed["message_id"]
+        )
+
+        if not message:
+            return None, None
+
+        return entity, message
+
+    except Exception as error:
+
+        print(
+            "[REACTIONS LIST ERROR]",
+            error
+        )
+
+        return None, None
+
+
+async def get_reaction_users(
+    entity,
+    message_id
+):
+
+    users_by_id = {}
+
+    reactions = []
+
+    offset = ""
+
+    while True:
+
+        try:
+
+            result = await client(
+                functions.messages.GetMessageReactionsListRequest(
+                    peer=entity,
+                    id=message_id,
+                    reaction=None,
+                    offset=offset,
+                    limit=100
+                )
+            )
+
+        except Exception as error:
+
+            print(
+                "[REACTIONS API ERROR]",
+                error
+            )
+
+            raise
+
+        for user in getattr(
+            result,
+            "users",
+            []
+        ):
+
+            users_by_id[
+                user.id
+            ] = user
+
+        batch = getattr(
+            result,
+            "reactions",
+            []
+        )
+
+        if not batch:
+            break
+
+        reactions.extend(
+            batch
+        )
+
+        next_offset = getattr(
+            result,
+            "next_offset",
+            None
+        )
+
+        if not next_offset:
+            break
+
+        offset = next_offset
+
+    return reactions, users_by_id
+
+
+def reaction_key(
+    reaction
+):
+
+    if isinstance(
+        reaction,
+        types.ReactionEmoji
+    ):
+
+        return reaction.emoticon
+
+    if isinstance(
+        reaction,
+        types.ReactionCustomEmoji
+    ):
+
+        return (
+            f"custom:{reaction.document_id}"
+        )
+
+    if isinstance(
+        reaction,
+        types.ReactionPaid
+    ):
+
+        return "paid"
+
+    return str(
+        reaction
+    )
+
+
+# ============================================================
+# .REACTCHECK
 # ============================================================
 
 @client.on(
     events.NewMessage(
         outgoing=True,
-        pattern=r"^\.status$"
+        pattern=r"^\.reactcheck(?:\s+(.+))?$"
     )
 )
-async def bot_status_report(event):
+async def reaction_checker(event):
 
-    report = [
-        "📊 **گزارش وضعیت سلف‌بات:**\n"
+    link = (
+        event.pattern_match.group(1)
+        or ""
+    ).strip()
+
+    if not link:
+
+        await event.edit(
+            "❌ لینک پست را وارد کن.\n\n"
+            ".reactcheck https://t.me/channel/123"
+        )
+
+        return
+
+    await event.edit(
+        "⏳ در حال بررسی ری‌اکشن‌های پست..."
+    )
+
+    entity, message = (
+        await resolve_message_from_link(
+            link
+        )
+    )
+
+    if not entity or not message:
+
+        await event.edit(
+            "❌ پست پیدا نشد یا لینک نامعتبر است."
+        )
+
+        return
+
+    try:
+
+        reaction_items, users = (
+            await get_reaction_users(
+                entity,
+                message.id
+            )
+        )
+
+    except Exception as error:
+
+        await event.edit(
+            "❌ تلگرام اجازه دریافت لیست "
+            "افراد ری‌اکشن‌دهنده این پست را نداد.\n\n"
+            f"جزئیات: {error}"
+        )
+
+        return
+
+    if not reaction_items:
+
+        await event.edit(
+            "📭 برای این پست ری‌اکشن قابل مشاهده‌ای پیدا نشد."
+        )
+
+        return
+
+    grouped = {}
+
+    for item in reaction_items:
+
+        key = reaction_key(
+            item.reaction
+        )
+
+        grouped.setdefault(
+            key,
+            []
+        )
+
+        user_id = getattr(
+            item,
+            "peer_id",
+            None
+        )
+
+        if isinstance(
+            user_id,
+            types.PeerUser
+        ):
+
+            user_id = user_id.user_id
+
+        if user_id in users:
+
+            grouped[key].append(
+                users[user_id]
+            )
+
+    lines = [
+        "📊 ری‌اکشن‌های پست\n"
     ]
 
+    for emoji, user_list in grouped.items():
+
+        lines.append(
+            f"{emoji} — {len(user_list)} نفر"
+        )
+
+        for user in user_list:
+
+            lines.append(
+                f"  • {user_mention(user)}"
+            )
+
+        lines.append("")
+
+    await event.edit(
+        "\n".join(lines),
+        parse_mode="html",
+        link_preview=False
+    )
+
+
+register_feature(
+    ".reactcheck",
+    "نمایش افرادی که روی یک پست ری‌اکشن زده‌اند",
+    "tools"
+)
+
+
+# ============================================================
+# .READMENTIONS
+# ============================================================
+
+@client.on(
+    events.NewMessage(
+        outgoing=True,
+        pattern=r"^\.readmentions$"
+    )
+)
+async def read_mentions(event):
+
+    try:
+
+        # API رسمی Telegram برای خواندن Mentions
+        await client(
+            functions.messages.ReadMentionsRequest(
+                peer=event.chat_id
+            )
+        )
+
+        await event.edit(
+            "✅ منشن‌های این چت سین شدند."
+        )
+
+    except Exception as error:
+
+        print(
+            "[MENTIONS ERROR]",
+            error
+        )
+
+        await event.edit(
+            f"❌ خطا در سین کردن منشن‌ها:\n{error}"
+        )
+
+
+register_feature(
+    ".readmentions",
+    "سین کردن پیام‌های دارای منشن",
+    "messages"
+)
+
+
+# ============================================================
+# STATUS HELPERS
+# ============================================================
+
+async def status_chat_name(
+    chat_id
+):
+
+    return await get_chat_display(
+        chat_id
+    )
+
+
+def format_rule_target(
+    rule
+):
+
+    parts = []
+
+    if rule.get("user_name"):
+
+        parts.append(
+            f"👤 {rule['user_name']}"
+        )
+
+    if rule.get("text"):
+
+        parts.append(
+            f"📝 «{rule['text']}»"
+        )
+
+    if not parts:
+
+        parts.append(
+            "همه پیام‌ها"
+        )
+
+    return " | ".join(
+        parts
+    )
+
+
+async def build_status():
+
+    lines = [
+        "📊 **گزارش کامل سلف‌بات**",
+        ""
+    ]
+
+    # --------------------------------------------------------
+    # .CAT
+    # --------------------------------------------------------
+
+    lines.append(
+        "🐱 **.cat**"
+    )
 
     if cat_chats:
 
-        report.append(
-            f"🐱 **چت‌های فعال .cat:** "
-            f"{len(cat_chats)} چت"
-        )
+        for chat_id in cat_chats:
+
+            name = await status_chat_name(
+                chat_id
+            )
+
+            lines.append(
+                f"  ✅ فعال — {name}"
+            )
 
     else:
 
-        report.append(
-            "🐱 **حالت .cat:** غیرفعال"
+        lines.append(
+            "  ❌ غیرفعال"
         )
 
+    lines.append("")
 
-    global fish_task_running
+    # --------------------------------------------------------
+    # .FISH
+    # --------------------------------------------------------
 
+    lines.append(
+        "🎣 **.fish**"
+    )
 
-    if (
-        fish_task_running
-        and not fish_task_running.done()
-    ):
+    active_fish = [
+        chat_id
+        for chat_id, task
+        in fish_tasks.items()
+        if task and not task.done()
+    ]
 
-        report.append(
-            "🎣 **وضعیت .fish:** فعال (هر ۳۱ دقیقه)"
-        )
+    if active_fish:
+
+        for chat_id in active_fish:
+
+            name = await status_chat_name(
+                chat_id
+            )
+
+            lines.append(
+                f"  ✅ فعال — {name}"
+            )
 
     else:
 
-        report.append(
-            "🎣 **وضعیت .fish:** غیرفعال"
+        lines.append(
+            "  ❌ غیرفعال"
         )
 
+    lines.append("")
+
+    # --------------------------------------------------------
+    # .REPLY
+    # --------------------------------------------------------
+
+    lines.append(
+        "🤖 **.reply**"
+    )
 
     if reply_rules:
 
-        total_rules = sum(
-            len(rules)
-            for rules in reply_rules.values()
-        )
+        for chat_id, rules in reply_rules.items():
 
-        report.append(
-            f"🤖 **ریپلای خودکار:** "
-            f"در {len(reply_rules)} چت "
-            f"({total_rules} قانون)"
-        )
+            name = await status_chat_name(
+                chat_id
+            )
+
+            lines.append(
+                f"  📍 {name}"
+            )
+
+            for trigger, response in rules.items():
+
+                lines.append(
+                    f"     «{trigger}» → «{response}»"
+                )
 
     else:
 
-        report.append(
-            "🤖 **ریپلای خودکار:** غیرفعال"
+        lines.append(
+            "  ❌ غیرفعال"
         )
 
+    lines.append("")
 
-    await event.edit(
-        "\n".join(report)
+    # --------------------------------------------------------
+    # .REACTION
+    # --------------------------------------------------------
+
+    lines.append(
+        "❤️ **.reaction**"
     )
 
+    if reaction_rules:
+
+        for chat_id, rules in reaction_rules.items():
+
+            if not rules:
+                continue
+
+            name = await status_chat_name(
+                chat_id
+            )
+
+            lines.append(
+                f"  📍 {name}"
+            )
+
+            for index, rule in enumerate(
+                rules,
+                1
+            ):
+
+                lines.append(
+                    f"     {index}. "
+                    f"{format_rule_target(rule)} "
+                    f"→ {rule['emoji']}"
+                )
+
+    else:
+
+        lines.append(
+            "  ❌ غیرفعال"
+        )
+
+    lines.append("")
+
+    # --------------------------------------------------------
+    # .SET
+    # --------------------------------------------------------
+
+    lines.append(
+        "⏰ **.set**"
+    )
+
+    if scheduled_messages:
+
+        for chat_id, count in scheduled_messages.items():
+
+            name = await status_chat_name(
+                chat_id
+            )
+
+            lines.append(
+                f"  📍 {name} — "
+                f"{count} پیام زمان‌بندی‌شده"
+            )
+
+    else:
+
+        lines.append(
+            "  ❌ موردی ثبت نشده"
+        )
+
+    lines.append("")
+
+    # --------------------------------------------------------
+    # UPTIME
+    # --------------------------------------------------------
+
+    uptime_seconds = int(
+        time.time() - START_TIME
+    )
+
+    hours, remainder = divmod(
+        uptime_seconds,
+        3600
+    )
+
+    minutes, seconds = divmod(
+        remainder,
+        60
+    )
+
+    lines.append(
+        "⏱ **.uptime**"
+    )
+
+    lines.append(
+        f"  {hours} ساعت، "
+        f"{minutes} دقیقه، "
+        f"{seconds} ثانیه"
+    )
+
+    lines.append("")
+
+    return "\n".join(
+        lines
+    )
+
+
+# 
+# ============================================================
+# .INFO
+# ============================================================
+
+@client.on(
+    events.NewMessage(
+        outgoing=True,
+        pattern=r"^\.i(?:nfo)?$"
+    )
+)
+async def info_command(event):
+
+    lines = [
+        "📋 **دستورات سلف‌بات**",
+        ""
+    ]
+
+    for command, data in FEATURES.items():
+
+        lines.append(
+            f"{command} : {data['description']}"
+        )
+
+    await event.edit(
+        "\n".join(lines)
+    )
+
+
+register_feature(
+    ".info",
+    "فهرست کوتاه دستورات",
+    "system"
+)
+
+register_feature(
+    ".i",
+    "فهرست کوتاه دستورات",
+    "system"
+)
 
 # ============================================================
 # .PING
@@ -1417,6 +2733,13 @@ async def ping(event):
     )
 
 
+register_feature(
+    ".ping",
+    "بررسی آنلاین بودن سلف‌بات",
+    "system"
+)
+
+
 # ============================================================
 # .WHOAMI
 # ============================================================
@@ -1429,21 +2752,564 @@ async def ping(event):
 )
 async def whoami(event):
 
-    me = await client.get_me()
+    try:
+
+        me = await client.get_me()
+
+        username = (
+            f"@{me.username}"
+            if me.username
+            else "No username"
+        )
+
+        await event.edit(
+            f"Name: {me.first_name or ''}\n"
+            f"Username: {username}\n"
+            f"ID: {me.id}"
+        )
+
+    except Exception as error:
+
+        await event.edit(
+            f"❌ خطا:\n{error}"
+        )
 
 
-    username = (
-        f"@{me.username}"
-        if me.username
-        else "No username"
+register_feature(
+    ".whoami",
+    "نمایش اطلاعات اکانت",
+    "account"
+)
+
+
+# ============================================================
+# DYNAMIC STATUS - GENERAL FEATURES
+# ============================================================
+
+async def append_general_feature_status(
+    lines
+):
+
+    # --------------------------------------------------------
+    # قابلیت‌هایی که وضعیت اختصاصی دارند قبلاً
+    # در build_status نمایش داده شده‌اند.
+    # این بخش فقط بقیه قابلیت‌ها را هم در Status می‌آورد.
+    # --------------------------------------------------------
+
+    special_features = {
+        ".cat",
+        ".stopcat",
+        ".fish",
+        ".stopfish",
+        ".reply",
+        ".stopreply",
+        ".reaction",
+        ".stopreaction",
+        ".reactions",
+        ".set",
+        ".status",
+        ".info",
+        ".i",
+        ".session",
+        ".uptime",
+        ".ping",
+        ".whoami",
+    }
+
+    lines.append(
+        "🧩 **سایر قابلیت‌ها**"
+    )
+
+    for command, data in FEATURES.items():
+
+        if command in special_features:
+            continue
+
+        lines.append(
+            f"  • {command} : "
+            f"{data['description']}"
+        )
+
+    lines.append("")
+
+
+# ============================================================
+# REBUILD STATUS WITH ALL FEATURES
+# ============================================================
+
+_old_build_status = build_status
+
+
+async def build_status():
+
+    lines = [
+        "📊 **گزارش کامل سلف‌بات**",
+        ""
+    ]
+
+    # ========================================================
+    # CAT
+    # ========================================================
+
+    lines.append(
+        "🐱 **.cat**"
+    )
+
+    if cat_chats:
+
+        for chat_id in sorted(
+            cat_chats,
+            key=str
+        ):
+
+            name = await status_chat_name(
+                chat_id
+            )
+
+            lines.append(
+                f"  ✅ فعال — {name}"
+            )
+
+    else:
+
+        lines.append(
+            "  ❌ هیچ چتی فعال نیست"
+        )
+
+    lines.append("")
+
+    # ========================================================
+    # FISH
+    # ========================================================
+
+    lines.append(
+        "🎣 **.fish**"
+    )
+
+    active_fish = []
+
+    for chat_id, task in fish_tasks.items():
+
+        if task and not task.done():
+
+            active_fish.append(
+                chat_id
+            )
+
+    if active_fish:
+
+        for chat_id in active_fish:
+
+            name = await status_chat_name(
+                chat_id
+            )
+
+            lines.append(
+                f"  ✅ فعال — {name}"
+            )
+
+            lines.append(
+                "     افسانه‌ای → یخچال | "
+                "عادی → فروش | هر ۳۱ دقیقه"
+            )
+
+    else:
+
+        lines.append(
+            "  ❌ هیچ چتی فعال نیست"
+        )
+
+    lines.append("")
+
+    # ========================================================
+    # REPLY
+    # ========================================================
+
+    lines.append(
+        "🤖 **.reply**"
+    )
+
+    if reply_rules:
+
+        for chat_id, rules in reply_rules.items():
+
+            name = await status_chat_name(
+                chat_id
+            )
+
+            lines.append(
+                f"  📍 {name}"
+            )
+
+            if not rules:
+
+                lines.append(
+                    "     بدون قانون"
+                )
+
+            for trigger, response in rules.items():
+
+                lines.append(
+                    f"     • "
+                    f"«{trigger}» → "
+                    f"«{response}»"
+                )
+
+    else:
+
+        lines.append(
+            "  ❌ هیچ قانونی فعال نیست"
+        )
+
+    lines.append("")
+
+    # ========================================================
+    # REACTION
+    # ========================================================
+
+    lines.append(
+        "❤️ **.reaction**"
+    )
+
+    active_reaction_chats = 0
+    total_reaction_rules = 0
+
+    for chat_id, rules in reaction_rules.items():
+
+        if not rules:
+            continue
+
+        active_reaction_chats += 1
+        total_reaction_rules += len(
+            rules
+        )
+
+        name = await status_chat_name(
+            chat_id
+        )
+
+        lines.append(
+            f"  📍 {name}"
+        )
+
+        for index, rule in enumerate(
+            rules,
+            1
+        ):
+
+            target_parts = []
+
+            if rule.get("user_name"):
+
+                target_parts.append(
+                    f"👤 {rule['user_name']}"
+                )
+
+            if rule.get("text"):
+
+                target_parts.append(
+                    f"📝 «{rule['text']}»"
+                )
+
+            if target_parts:
+
+                target = " | ".join(
+                    target_parts
+                )
+
+            else:
+
+                target = "همه پیام‌ها"
+
+            lines.append(
+                f"     {index}. "
+                f"{target} → "
+                f"{rule['emoji']}"
+            )
+
+    if active_reaction_chats == 0:
+
+        lines.append(
+            "  ❌ هیچ قانون فعالی نیست"
+        )
+
+    else:
+
+        lines.append(
+            f"  📊 مجموع: "
+            f"{total_reaction_rules} قانون "
+            f"در {active_reaction_chats} چت"
+        )
+
+    lines.append("")
+
+    # ========================================================
+    # SET / SCHEDULE
+    # ========================================================
+
+    lines.append(
+        "⏰ **.set**"
+    )
+
+    if scheduled_messages:
+
+        for chat_id, count in scheduled_messages.items():
+
+            name = await status_chat_name(
+                chat_id
+            )
+
+            lines.append(
+                f"  📍 {name} — "
+                f"{count} پیام زمان‌بندی‌شده"
+            )
+
+    else:
+
+        lines.append(
+            "  ❌ پیام زمان‌بندی‌شده‌ای ثبت نشده"
+        )
+
+    lines.append("")
+
+    # ========================================================
+    # DELETE
+    # ========================================================
+
+    lines.append(
+        "🗑 **.delete**"
+    )
+
+    lines.append(
+        "  ✅ فعال — حذف تعداد مشخصی از "
+        "پیام‌های خود کاربر"
+    )
+
+    lines.append("")
+
+    # ========================================================
+    # SAVE
+    # ========================================================
+
+    lines.append(
+        "💾 **.save**"
+    )
+
+    lines.append(
+        "  ✅ فعال — ذخیره پیام ریپلای‌شده "
+        "در Saved Messages"
+    )
+
+    lines.append("")
+
+    # ========================================================
+    # REACTCHECK
+    # ========================================================
+
+    lines.append(
+        "📊 **.reactcheck**"
+    )
+
+    lines.append(
+        "  ✅ فعال — بررسی ری‌اکشن‌های "
+        "یک پست با لینک"
+    )
+
+    lines.append("")
+
+    # ========================================================
+    # READ MENTIONS
+    # ========================================================
+
+    lines.append(
+        "🔔 **.readmentions**"
+    )
+
+    lines.append(
+        "  ✅ فعال — سین کردن منشن‌های "
+        "قابل دسترسی تلگرام"
+    )
+
+    lines.append("")
+
+    # ========================================================
+    # ACCOUNT
+    # ========================================================
+
+    lines.append(
+        "👤 **.whoami**"
+    )
+
+    try:
+
+        me = await client.get_me()
+
+        username = (
+            f"@{me.username}"
+            if me.username
+            else "بدون username"
+        )
+
+        lines.append(
+            f"  👤 {me.first_name or ''} "
+            f"{me.last_name or ''}".strip()
+        )
+
+        lines.append(
+            f"  🔹 {username}"
+        )
+
+        lines.append(
+            f"  🆔 {me.id}"
+        )
+
+    except Exception:
+
+        lines.append(
+            "  ⚠️ اطلاعات اکانت قابل دریافت نیست"
+        )
+
+    lines.append("")
+
+    # ========================================================
+    # UPTIME
+    # ========================================================
+
+    uptime_seconds = int(
+        time.time() - START_TIME
+    )
+
+    hours, remainder = divmod(
+        uptime_seconds,
+        3600
+    )
+
+    minutes, seconds = divmod(
+        remainder,
+        60
+    )
+
+    lines.append(
+        "⏱ **.uptime**"
+    )
+
+    lines.append(
+        f"  {hours} ساعت، "
+        f"{minutes} دقیقه، "
+        f"{seconds} ثانیه"
+    )
+
+    lines.append("")
+
+    # ========================================================
+    # SYSTEM COMMANDS
+    # ========================================================
+
+    lines.append(
+        "⚙️ **دستورات سیستمی**"
+    )
+
+    lines.append(
+        "  • .ping : آنلاین"
+    )
+
+    lines.append(
+        "  • .session : Session فعال"
+    )
+
+    lines.append(
+        "  • .info / .i : فهرست دستورات"
+    )
+
+    lines.append("")
+
+    # ========================================================
+    # ALL REGISTERED FEATURES
+    # ========================================================
+
+    lines.append(
+        "🧩 **همه قابلیت‌های ثبت‌شده**"
+    )
+
+    for command, data in FEATURES.items():
+
+        lines.append(
+            f"  • {command} : "
+            f"{data['description']}"
+        )
+
+    return "\n".join(
+        lines
     )
 
 
-    await event.edit(
-        f"Name: {me.first_name or ''}\n"
-        f"Username: {username}\n"
-        f"ID: {me.id}"
+# ============================================================
+# .STATUS
+# ============================================================
+
+@client.on(
+    events.NewMessage(
+        outgoing=True,
+        pattern=r"^\.status$"
     )
+)
+async def bot_status_report(event):
+
+    try:
+
+        report = await build_status()
+
+        await event.edit(
+            report
+        )
+
+    except Exception as error:
+
+        print(
+            "[STATUS ERROR]",
+            error
+        )
+
+        await event.edit(
+            f"❌ خطا در ساخت Status:\n{error}"
+        )
+
+
+# ============================================================
+# FEATURE REGISTRATION
+# ============================================================
+
+# این قابلیت قبلاً در قسمت اول ثبت شده بود.
+# چون handler آن نیز در قسمت اول وجود دارد،
+# اینجا دوباره ثبت نمی‌کنیم.
+
+
+# ============================================================
+# SAFE TASK CLEANUP
+# ============================================================
+
+async def cancel_all_tasks():
+
+    tasks = []
+
+    for task in fish_tasks.values():
+
+        if task and not task.done():
+
+            tasks.append(
+                task
+            )
+
+    for task in tasks:
+
+        task.cancel()
+
+    if tasks:
+
+        await asyncio.gather(
+            *tasks,
+            return_exceptions=True
+        )
 
 
 # ============================================================
@@ -1456,9 +3322,7 @@ async def main():
 
     MAIN_LOOP = asyncio.get_running_loop()
 
-
     start_web_server()
-
 
     print(
         "======================================"
@@ -1472,12 +3336,17 @@ async def main():
         "======================================"
     )
 
+    # ========================================================
+    # AUTHENTICATION
+    # ========================================================
+    #
+    # این بخش عمداً همان سیستم اصلی است.
+    # Session موجود همچنان اولویت دارد.
+    #
 
     await authenticate()
 
-
     me = await client.get_me()
-
 
     print(
         "======================================"
@@ -1496,11 +3365,20 @@ async def main():
     )
 
     print(
+        f"ID: {me.id}"
+    )
+
+    print(
         "======================================"
     )
 
+    try:
 
-    await client.run_until_disconnected()
+        await client.run_until_disconnected()
+
+    finally:
+
+        await cancel_all_tasks()
 
 
 # ============================================================
