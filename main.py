@@ -433,7 +433,7 @@ async def uptime_bot(event):
     await event.edit(f"⏱ **آب‌تایم بات:** {hours} ساعت و {minutes} دقیقه و {seconds} ثانیه")
 
 # ============================================================
-# .FISH (UPDATED)
+# .FISH (DYNAMIC INTERVAL)
 # ============================================================
 
 fish_task_running = None
@@ -464,16 +464,32 @@ async def run_fish_workflow(client, chat_id):
     except Exception as error:
         print("[FISH ERROR]", error)
 
-@client.on(events.NewMessage(outgoing=True, pattern=r"^\.fish$"))
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.fish(?:\s|$)?"))
 async def start_fish_loop(event):
     global fish_task_running
+    
+    # استخراج فاصله زمانی از متن دستور (مثلا .fish 11m)
+    cmd_text = event.raw_text.strip()
+    match = re.search(r"^\.fish\s+(.+)$", cmd_text, re.IGNORECASE)
+    
+    if not match:
+        await event.edit("❌ لطفا زمان را وارد کنید.\nمثال:\n`.fish 11m` یا `.fish 30s` یا `.fish 1h`")
+        return
+        
+    interval_str = match.group(1).strip()
+    interval_seconds = parse_interval(interval_str)
+    
+    if interval_seconds is None or interval_seconds <= 0:
+        await event.edit("❌ فرمت زمان نامعتبر است. از s (ثانیه)، m (دقیقه) یا h (ساعت) استفاده کنید.")
+        return
+
     chat_id = event.chat_id
-    await event.edit("🎣 اتوماسیون ماهی فعال شد (ماهی افسانه‌ای ⬅️ یخچال، عادی ⬅️ فروش | هر ۳۱ دقیقه).")
+    await event.edit(f"🎣 اتوماسیون ماهی فعال شد (هر {interval_str} یک‌بار | افسانه‌ای ⬅️ یخچال، عادی ⬅️ فروش).")
 
     async def loop_job():
         while True:
             await run_fish_workflow(client, chat_id)
-            await asyncio.sleep(31 * 60)
+            await asyncio.sleep(interval_seconds)
 
     if fish_task_running:
         fish_task_running.cancel()
@@ -488,6 +504,7 @@ async def stop_fish_loop(event):
         await event.edit("🛑 اتوماسیون ماهی متوقف شد.")
     else:
         await event.edit("❌ هیچ اتوماسیونی فعالی وجود ندارد.")
+
 
 # ============================================================
 # AUTO-REACTION FEATURE (FIXED SEPARATION)
