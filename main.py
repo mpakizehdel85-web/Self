@@ -227,7 +227,7 @@ COMMAND_DESCRIPTIONS = {
     ".set": "زمان‌بندی ارسال پیام",
     ".reply": "تنظیم پاسخ خودکار",
     ".stopreply": "توقف پاسخ خودکار",
-    ".cat": "حالت نجات پیشی",
+    ".cat": "حالت نجات پیشی (مخفی)",
     ".stopcat": "توقف نجات پیشی",
     ".delete": "پاکسازی پیام‌ها",
     ".save": "ذخیره پیام در سیو مسیج",
@@ -236,7 +236,7 @@ COMMAND_DESCRIPTIONS = {
     ".stopfish": "توقف اتوماسیون ماهی",
     ".autoreact": "تنظیم ریکشن خودکار",
     ".stopautoreact": "توقف ریکشن خودکار",
-    ".mentions": "خواندن منشن‌ها و تگ‌های چت",
+    ".mentions": "خواندن و رفع منشن‌های خوانده‌نشده چت",
     ".status": "گزارش کامل وضعیت بات",
     ".i": "فهرست خلاصه دستورات",
     ".ping": "بررسی آنلاین بودن",
@@ -352,7 +352,7 @@ async def stop_reply(event):
     await event.edit("🛑 ریپلای خودکار متوقف شد.")
 
 # ============================================================
-# .CAT
+# .CAT (SILENT MODE)
 # ============================================================
 
 cat_chats = set()
@@ -360,7 +360,10 @@ cat_chats = set()
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.cat$"))
 async def start_cat(event):
     cat_chats.add(event.chat_id)
-    await event.edit("🐱 حالت نجات پیشی فعال شد.")
+    try:
+        await event.delete()
+    except Exception:
+        pass
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopcat$"))
 async def stop_cat(event):
@@ -487,16 +490,16 @@ async def stop_fish_loop(event):
         await event.edit("❌ هیچ اتوماسیونی فعالی وجود ندارد.")
 
 # ============================================================
-# AUTO-REACTION FEATURE
+# AUTO-REACTION FEATURE (FIXED)
 # ============================================================
 
 autoreact_rules = {}
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.autoreact(?:\s|$)"))
 async def set_autoreact(event):
-    match = re.match(r"^\.autoreact\s+(.+?)\s+(.+)$", event.raw_text.strip())
+    match = re.match(r"^\.autoreact\s+(.+?)\s+([^\s]+)$", event.raw_text.strip())
     if not match:
-        await event.edit("❌ فرمت اشتباه.\nمثال:\n`.autoreact کلمه_یا_آیدی ❤️`")
+        await event.edit("❌ فرمت اشتباه.\nمثال:\n`.autoreact @username ❤️` یا `.autoreact کلمه ❤️`")
         return
     target = match.group(1).strip()
     emoji = match.group(2).strip()
@@ -517,34 +520,34 @@ async def handle_autoreact(event):
     chat_id = event.chat_id
     if chat_id not in autoreact_rules:
         return
+    
     rules = autoreact_rules[chat_id]
     sender = await event.get_sender()
     sender_id_str = str(sender.id) if sender else ""
-    sender_username = f"@{sender.username}" if sender and getattr(sender, 'username', None) else ""
+    sender_username = f"@{sender.username}".casefold() if sender and getattr(sender, 'username', None) else ""
     msg_text = event.raw_text or ""
 
+    matched = False
     for target, emoji in rules.items():
-        if (target == sender_id_str or 
-            target.casefold() == sender_username.casefold() or 
-            target.casefold() in msg_text.casefold()):
+        t_clean = target.casefold()
+        if (t_clean == sender_id_str or 
+            t_clean == sender_username or 
+            t_clean in msg_text.casefold()):
+            matched = True
             try:
-                await event.反应(emoji) if hasattr(event, '反应') else await client.send_read_acknowledge(event.chat_id)
-                await event.client.send_message(event.chat_id, f"[AutoReact] ریکشن ثبت شد", parse_mode='md') # Optional fallback or direct reaction via client API
-            except Exception:
-                try:
-                    from telethon.tl.functions.messages import SendReactionRequest
-                    from telethon.tl.types import ReactionEmoji
-                    await client(SendReactionRequest(
-                        peer=event.chat_id,
-                        msg_id=event.id,
-                        reaction=[ReactionEmoji(emoticon=emoji)]
-                    ))
-                except Exception as err:
-                    print("[AUTOREACT ERROR]", err)
+                from telethon.tl.functions.messages import SendReactionRequest
+                from telethon.tl.types import ReactionEmoji
+                await client(SendReactionRequest(
+                    peer=event.chat_id,
+                    msg_id=event.id,
+                    reaction=[ReactionEmoji(emoticon=emoji)]
+                ))
+            except Exception as err:
+                print("[AUTOREACT ERROR]", err)
             break
 
 # ============================================================
-# .MENTIONS (READ MENTIONS, TAGS, IDS, REPLIES)
+# .MENTIONS (CLEAR UNREAD MENTIONS & TAGS)
 # ============================================================
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.mentions$"))
@@ -553,44 +556,43 @@ async def fetch_mentions(event):
     my_id = me.id
     my_username = f"@{me.username}".casefold() if me.username else None
 
-    await event.edit("🔍 در حال جستجوی منشن‌ها و تگ‌ها...")
+    await event.edit("🔍 در حال خواندن و پاکسازی منشن‌های خوانده‌نشده...")
     count = 0
-    report = ["📌 **منشن‌ها و تگ‌های اخیر این چت:**\n"]
 
-    async for message in client.iter_messages(event.chat_id, limit=100):
-        is_matched = False
-        
-        # Check replies
-        if message.is_reply:
-            reply_msg = await message.get_reply_message()
-            if reply_msg and reply_msg.sender_id == my_id:
-                is_matched = True
+    try:
+        async for message in client.iter_messages(event.chat_id, limit=50):
+            is_matched = False
+            
+            # Check replies
+            if message.is_reply:
+                reply_msg = await message.get_reply_message()
+                if reply_msg and reply_msg.sender_id == my_id:
+                    is_matched = True
 
-        # Check mentions / text / entities
-        if message.raw_text:
-            txt = message.raw_text.casefold()
-            if my_username and my_username in txt:
-                is_matched = True
-            if str(my_id) in txt:
-                is_matched = True
-            if message.entities:
-                from telethon.tl.types import MessageEntityMention, MessageEntityMentionName
-                for entity in message.entities:
-                    if isinstance(entity, (MessageEntityMention, MessageEntityMentionName)):
-                        is_matched = True
+            # Check mentions / text / entities
+            if message.raw_text:
+                txt = message.raw_text.casefold()
+                if my_username and my_username in txt:
+                    is_matched = True
+                if str(my_id) in txt:
+                    is_matched = True
+                if message.entities:
+                    from telethon.tl.types import MessageEntityMention, MessageEntityMentionName
+                    for entity in message.entities:
+                        if isinstance(entity, (MessageEntityMention, MessageEntityMentionName)):
+                            is_matched = True
 
-        if is_matched:
-            link = f"https://t.me/c/{message.chat_id}/{message.id}" if not str(message.chat_id).startswith('-100') else f"https://t.me/c/{str(message.chat_id)[4:]}/{message.id}"
-            snippet = message.raw_text[:50].replace('\n', ' ') if message.raw_text else "[Media]"
-            report.append(f"- [پیام #{message.id}]({link}): {snippet}")
-            count += 1
-            if count >= 15:
-                break
+            if is_matched:
+                try:
+                    # Mark message or chat as read to clear @ / unread badges
+                    await client.send_read_acknowledge(event.chat_id, max_id=message.id)
+                    count += 1
+                except Exception:
+                    pass
 
-    if count == 0:
-        await event.edit("❌ هیچ منشن یا تگی برای شما پیدا نشد.")
-    else:
-        await event.edit("\n".join(report), link_preview=False)
+        await event.edit(f"✅ تعداد {count} منشن/تگ خوانده‌نشده در این چت پاکسازی و از حالت خوانده‌نشده خارج شد.")
+    except Exception as e:
+        await event.edit(f"❌ خطا در پردازش منشن‌ها: {e}")
 
 # ============================================================
 # .STATUS (DETAILED)
@@ -606,7 +608,7 @@ async def bot_status_report(event):
         for cid in cat_chats:
             info = await get_chat_display_info(cid)
             cat_lines.append(f"  • {info}")
-        report.append(f"🐱 **حالت .cat (فعال):**\n" + "\n".join(cat_lines))
+        report.append(f"🐱 **حالت .cat (فعال - مخفی):**\n" + "\n".join(cat_lines))
     else:
         report.append("🐱 **حالت .cat:** غیرفعال")
 
@@ -637,7 +639,7 @@ async def bot_status_report(event):
     else:
         report.append("❤️ **ریکشن خودکار (.autoreact):** غیرفعال")
 
-    await event.edit("\n".join(report), link_preview=False)
+    await event.edit("\n".join(report), link_plural=False, link_preview=False)
 
 # ============================================================
 # .PING
