@@ -9,7 +9,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs
 
-from telethon import TelegramClient, events
+from telethon import TelegramClient, events, functions
 from telethon.errors import SessionPasswordNeededError
 from telethon.sessions import StringSession
 
@@ -236,7 +236,7 @@ COMMAND_DESCRIPTIONS = {
     ".stopfish": "توقف اتوماسیون ماهی",
     ".autoreact": "تنظیم ریکشن خودکار",
     ".stopautoreact": "توقف ریکشن خودکار",
-    ".mentions": "خواندن و رفع منشن‌های خوانده‌نشده چت",
+    ".readmentions": "سین کردن همه منشن‌های قابل‌دسترسی",
     ".status": "گزارش کامل وضعیت بات",
     ".i": "فهرست خلاصه دستورات",
     ".ping": "بررسی آنلاین بودن",
@@ -490,7 +490,7 @@ async def stop_fish_loop(event):
         await event.edit("❌ هیچ اتوماسیونی فعالی وجود ندارد.")
 
 # ============================================================
-# AUTO-REACTION FEATURE (FIXED)
+# AUTO-REACTION FEATURE (FIXED SEPARATION)
 # ============================================================
 
 autoreact_rules = {}
@@ -527,13 +527,20 @@ async def handle_autoreact(event):
     sender_username = f"@{sender.username}".casefold() if sender and getattr(sender, 'username', None) else ""
     msg_text = event.raw_text or ""
 
-    matched = False
     for target, emoji in rules.items():
         t_clean = target.casefold()
-        if (t_clean == sender_id_str or 
-            t_clean == sender_username or 
-            t_clean in msg_text.casefold()):
-            matched = True
+        matched = False
+
+        # اگر target با @ شروع شود یا عدد (آیدی عددی) باشد، دقیقاً باید فرستنده پیام مطابقت داشته باشد
+        if t_clean.startswith("@") or t_clean.isdigit():
+            if t_clean == sender_id_str or t_clean == sender_username:
+                matched = True
+        else:
+            # اگر متن معمولی/کلمه باشد، فقط در متن پیام چک شود
+            if t_clean in msg_text.casefold():
+                matched = True
+
+        if matched:
             try:
                 from telethon.tl.functions.messages import SendReactionRequest
                 from telethon.tl.types import ReactionEmoji
@@ -547,55 +554,71 @@ async def handle_autoreact(event):
             break
 
 # ============================================================
-# .MENTIONS (CLEAR UNREAD MENTIONS & TAGS)
+# .READMENTIONS
 # ============================================================
 
-@client.on(events.NewMessage(outgoing=True, pattern=r"^\.mentions$"))
-async def fetch_mentions(event):
-    me = await client.get_me()
-    my_id = me.id
-    my_username = f"@{me.username}".casefold() if me.username else None
+@client.on(
+    events.NewMessage(
+        outgoing=True,
+        pattern=r"^\.readmentions$"
+    )
+)
+async def read_mentions(event):
 
-    await event.edit("🔍 در حال خواندن و پاکسازی منشن‌های خوانده‌نشده...")
-    count = 0
+    await event.edit(
+        "⏳ در حال سین کردن همه منشن‌ها..."
+    )
+
+    read_count = 0
+    failed_count = 0
 
     try:
-        async for message in client.iter_messages(event.chat_id, limit=50):
-            is_matched = False
-            
-            # Check replies
-            if message.is_reply:
-                reply_msg = await message.get_reply_message()
-                if reply_msg and reply_msg.sender_id == my_id:
-                    is_matched = True
 
-            # Check mentions / text / entities
-            if message.raw_text:
-                txt = message.raw_text.casefold()
-                if my_username and my_username in txt:
-                    is_matched = True
-                if str(my_id) in txt:
-                    is_matched = True
-                if message.entities:
-                    from telethon.tl.types import MessageEntityMention, MessageEntityMentionName
-                    for entity in message.entities:
-                        if isinstance(entity, (MessageEntityMention, MessageEntityMentionName)):
-                            is_matched = True
+        async for dialog in client.iter_dialogs():
 
-            if is_matched:
-                try:
-                    # Mark message or chat as read to clear @ / unread badges
-                    await client.send_read_acknowledge(event.chat_id, max_id=message.id)
-                    count += 1
-                except Exception:
-                    pass
+            # فقط چت‌هایی که امکان خواندن پیام دارند
+            if not dialog.is_group and not dialog.is_channel and not dialog.is_user:
+                continue
 
-        await event.edit(f"✅ تعداد {count} منشن/تگ خوانده‌نشده در این چت پاکسازی و از حالت خوانده‌نشده خارج شد.")
-    except Exception as e:
-        await event.edit(f"❌ خطا در پردازش منشن‌ها: {e}")
+            try:
+
+                await client(
+                    functions.messages.ReadMentionsRequest(
+                        peer=dialog.entity
+                    )
+                )
+
+                read_count += 1
+
+            except Exception as error:
+
+                failed_count += 1
+
+                print(
+                    "[READMENTIONS ERROR]",
+                    dialog.name,
+                    error
+                )
+
+        await event.edit(
+            "✅ همه منشن‌های قابل‌دسترسی سین شدند.\n\n"
+            f"📂 چت‌های بررسی‌شده: {read_count}\n"
+            f"⚠️ چت‌های دارای خطا: {failed_count}"
+        )
+
+    except Exception as error:
+
+        print(
+            "[READMENTIONS ERROR]",
+            error
+        )
+
+        await event.edit(
+            f"❌ خطا در سین کردن منشن‌ها:\n{error}"
+        )
 
 # ============================================================
-# .STATUS (DETAILED)
+# .STATUS (FIXED)
 # ============================================================
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.status$"))
@@ -639,7 +662,7 @@ async def bot_status_report(event):
     else:
         report.append("❤️ **ریکشن خودکار (.autoreact):** غیرفعال")
 
-    await event.edit("\n".join(report), link_plural=False, link_preview=False)
+    await event.edit("\n".join(report), link_preview=False)
 
 # ============================================================
 # .PING
