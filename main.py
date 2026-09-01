@@ -239,7 +239,7 @@ COMMAND_DESCRIPTIONS = {
     ".readmentions": "سین کردن منشن‌های این چت",
     ".userinfo": "اطلاعات حساب کاربر با ریپلای",
     ".tag": "تگ کردن هوشمند کاربران",
-    ".kazino": "اتوماسیون پویا و پرسرعت کازینو و تاس",
+    ".kazino": "اتوماسیون کازینو (مثلا .kazino 🎰)",
     ".stopkazino": "توقف اتوماسیون کازینو",
     ".stopall": "توقف تمام قابلیت‌های فعال در همه جا",
     ".status": "گزارش کامل وضعیت بات",
@@ -734,7 +734,7 @@ async def tag_users(event):
         await event.edit(f"❌ خطا در تگ هوشمند کاربران:\n{error}")
 
 # ============================================================
-# .KAZINO (DYNAMIC MULTI-GAME JACKPOT AUTOMATION)
+# .KAZINO (MAX-SPEED DYNAMIC MULTI-GAME SILENT AUTOMATION)
 # ============================================================
 
 kazino_active_chats = set()
@@ -744,14 +744,13 @@ async def start_kazino(event):
     match = event.pattern_match
     emoji = match.group(1).strip() if match.group(1) else "🎰"
     
-    # تعیین حداکثر امتیاز برد (Target Value) بر اساس نوع ایموجی
     target_values = {
-        "🎰": 64,  # جک‌پات 777
-        "🎲": 6,   # تاس شش
-        "🎯": 6,   # بولزآی دارت
-        "🎳": 6,   # استرایک بولینگ
-        "🏀": 5,   # گل بسکتبال
-        "⚽": 5    # گل فوتبال
+        "🎰": 64,
+        "🎲": 6,
+        "🎯": 6,
+        "🎳": 6,
+        "🏀": 5,
+        "⚽": 5
     }
     
     winning_value = target_values.get(emoji, 6)
@@ -788,7 +787,6 @@ async def start_kazino(event):
                 
             if dice_value == winning_value:
                 kazino_active_chats.discard(chat_id)
-                await client.send_message(chat_id, f"🎉 **امتیاز هدف ({emoji}) با موفقیت شکار شد!**")
                 break
             
             try:
@@ -833,7 +831,7 @@ async def stop_all_features(event):
         "• پاسخ‌های خودکار (`.reply`) پاک شدند.\n"
         "• حالت پیشی (`.cat`) غیرفعال شد.\n"
         "• ریکشن‌های خودکار (`.autoreact`) متوقف شدند.\n"
-        "• اتوماسیون کازینو و بازی‌ها (`.kazino`) متوقف شد."
+        "• اتوماسیون کازینو (`.kazino`) متوقف شد."
     )
 
 # ============================================================
@@ -878,9 +876,9 @@ async def bot_status_report(event):
         report.append("❤️ **ریکشن خودکار (.autoreact):** غیرفعال")
 
     if kazino_active_chats:
-        report.append("🎰 **اتوماسیون کازینو و بازی‌ها (.kazino):** فعال")
+        report.append("🎰 **اتوماسیون کازینو (.kazino):** فعال")
     else:
-        report.append("🎰 **اتوماسیون کازینو و بازی‌ها (.kazino):** غیرفعال")
+        report.append("🎰 **اتوماسیون کازینو (.kazino):** غیرفعال")
 
     await event.edit("\n".join(report), link_preview=False)
 
