@@ -734,13 +734,28 @@ async def tag_users(event):
         await event.edit(f"❌ خطا در تگ هوشمند کاربران:\n{error}")
 
 # ============================================================
-# .KAZINO (MAX-SPEED INSTANT-CHECK 777 AUTOMATION)
+# .KAZINO (DYNAMIC MULTI-GAME JACKPOT AUTOMATION)
 # ============================================================
 
 kazino_active_chats = set()
 
-@client.on(events.NewMessage(outgoing=True, pattern=r"^\.kazino$"))
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.kazino(?:\s+(.+))?$"))
 async def start_kazino(event):
+    match = event.pattern_match
+    emoji = match.group(1).strip() if match.group(1) else "🎰"
+    
+    # تعیین حداکثر امتیاز برد (Target Value) بر اساس نوع ایموجی
+    target_values = {
+        "🎰": 64,  # جک‌پات 777
+        "🎲": 6,   # تاس شش
+        "🎯": 6,   # بولزآی دارت
+        "🎳": 6,   # استرایک بولینگ
+        "🏀": 5,   # گل بسکتبال
+        "⚽": 5    # گل فوتبال
+    }
+    
+    winning_value = target_values.get(emoji, 6)
+
     if not event.is_reply:
         try:
             await event.delete()
@@ -752,7 +767,6 @@ async def start_kazino(event):
     chat_id = event.chat_id
     kazino_active_chats.add(chat_id)
     
-    # دستور کاربر با سرعت بالا و بدون پاسخ پاک می‌شود
     try:
         await event.delete()
     except Exception:
@@ -762,31 +776,26 @@ async def start_kazino(event):
         from telethon.tl.types import InputMediaDice
         
         while chat_id in kazino_active_chats:
-            # ارسال آنی تاس اسلات با ریپلای روی پیام هدف
             sent_msg = await client.send_message(
                 chat_id, 
-                file=InputMediaDice(emoticon="🎰"), 
+                file=InputMediaDice(emoticon=emoji), 
                 reply_to=reply_msg.id
             )
             
-            # بررسی آنی مقدار مدیا بدون هیچ مکث و تاخیر
             dice_value = None
             if sent_msg.media and hasattr(sent_msg.media, 'value'):
                 dice_value = sent_msg.media.value
                 
-            # مقدار ۶۴ در تاس اسلات تلگرام دقیقاً برابر با جک‌پات ۷۷۷ است
-            if dice_value == 64:
+            if dice_value == winning_value:
                 kazino_active_chats.discard(chat_id)
-                await client.send_message(chat_id, "🎉 **جک‌پات ۷۷۷ با موفقیت شکار شد!**")
+                await client.send_message(chat_id, f"🎉 **امتیاز هدف ({emoji}) با موفقیت شکار شد!**")
                 break
             
-            # اگر ۷۷۷ نبود، با بالاترین سرعت ممکن حذفش کن
             try:
                 await sent_msg.delete()
             except Exception:
                 pass
                 
-            # تنفس بسیار ناچیز به پردازنده برای جلوگیری از قفل شدن لوپ
             await asyncio.sleep(0.02)
                 
     except Exception as error:
