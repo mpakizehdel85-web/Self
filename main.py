@@ -236,7 +236,10 @@ COMMAND_DESCRIPTIONS = {
     ".stopfish": "توقف اتوماسیون ماهی",
     ".autoreact": "تنظیم ریکشن خودکار",
     ".stopautoreact": "توقف ریکشن خودکار",
-    ".readmentions": "سین کردن همه منشن‌های قابل‌دسترسی",
+    ".readmentions": "سین کردن منشن‌های این چت",
+    ".userinfo": "اطلاعات حساب کاربر با ریپلای",
+    ".tag": "تگ کردن گروهی کاربران",
+    ".stopall": "توقف تمام قابلیت‌های فعال در همه جا",
     ".status": "گزارش کامل وضعیت بات",
     ".i": "فهرست خلاصه دستورات",
     ".ping": "بررسی آنلاین بودن",
@@ -468,7 +471,6 @@ async def run_fish_workflow(client, chat_id):
 async def start_fish_loop(event):
     global fish_task_running
     
-    # استخراج فاصله زمانی از متن دستور (مثلا .fish 11m)
     cmd_text = event.raw_text.strip()
     match = re.search(r"^\.fish\s+(.+)$", cmd_text, re.IGNORECASE)
     
@@ -505,27 +507,40 @@ async def stop_fish_loop(event):
     else:
         await event.edit("❌ هیچ اتوماسیونی فعالی وجود ندارد.")
 
-
 # ============================================================
-# AUTO-REACTION FEATURE (FIXED SEPARATION)
+# AUTO-REACTION FEATURE (SUPPORTING USERNAME, NUMERIC ID, & REPLY)
 # ============================================================
 
 autoreact_rules = {}
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.autoreact(?:\s|$)"))
 async def set_autoreact(event):
-    match = re.match(r"^\.autoreact\s+(.+?)\s+([^\s]+)$", event.raw_text.strip())
-    if not match:
-        await event.edit("❌ فرمت اشتباه.\nمثال:\n`.autoreact @username ❤️` یا `.autoreact کلمه ❤️`")
+    cmd_text = event.raw_text.strip()
+    match = re.match(r"^\.autoreact\s+(.+?)\s+([^\s]+)$", cmd_text)
+    
+    target = None
+    emoji = None
+
+    if match:
+        target = match.group(1).strip()
+        emoji = match.group(2).strip()
+    elif event.is_reply:
+        parts = cmd_text.split()
+        if len(parts) == 2:
+            emoji = parts[1].strip()
+            reply_msg = await event.get_reply_message()
+            if reply_msg and reply_msg.sender_id:
+                target = str(reply_msg.sender_id)
+
+    if not target or not emoji:
+        await event.edit("❌ فرمت اشتباه.\nمثال:\n`.autoreact @username ❤️`\nیا روی پیام شخص ریپلای کنید و بنویسید:\n`.autoreact ❤️`")
         return
-    target = match.group(1).strip()
-    emoji = match.group(2).strip()
 
     if event.chat_id not in autoreact_rules:
         autoreact_rules[event.chat_id] = {}
 
     autoreact_rules[event.chat_id][target.casefold()] = emoji
-    await event.edit(f"✅ ریکشن خودکار فعال شد.\nهدف/متن: {target}\nایموجی: {emoji}")
+    await event.edit(f"✅ ریکشن خودکار فعال شد.\nهدف: {target}\nایموجی: {emoji}")
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopautoreact$"))
 async def stop_autoreact(event):
@@ -548,12 +563,10 @@ async def handle_autoreact(event):
         t_clean = target.casefold()
         matched = False
 
-        # اگر target با @ شروع شود یا عدد (آیدی عددی) باشد، دقیقاً باید فرستنده پیام مطابقت داشته باشد
         if t_clean.startswith("@") or t_clean.isdigit():
             if t_clean == sender_id_str or t_clean == sender_username:
                 matched = True
         else:
-            # اگر متن معمولی/کلمه باشد، فقط در متن پیام چک شود
             if t_clean in msg_text.casefold():
                 matched = True
 
@@ -571,7 +584,7 @@ async def handle_autoreact(event):
             break
 
 # ============================================================
-# .READMENTIONS
+# .READMENTIONS (CURRENT CHAT ONLY)
 # ============================================================
 
 @client.on(
@@ -609,14 +622,134 @@ async def read_mentions(event):
         )
 
 # ============================================================
-# .STATUS (FIXED)
+# .USERINFO (GET ID & USER DETAILS VIA REPLY OR USERNAME/ID)
+# ============================================================
+
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.userinfo(?:\s|$)?"))
+async def user_info(event):
+    target_user = None
+    cmd_text = event.raw_text.strip()
+    match = re.match(r"^\.userinfo\s+(.+)$", cmd_text)
+
+    try:
+        if match:
+            query = match.group(1).strip()
+            target_user = await client.get_entity(query)
+        elif event.is_reply:
+            reply_msg = await event.get_reply_message()
+            if reply_msg:
+                target_user = await client.get_entity(reply_msg.sender_id)
+        else:
+            target_user = await event.get_sender()
+
+        if not target_user:
+            await event.edit("❌ کاربر مورد نظر یافت نشد.")
+            return
+
+        name = f"{target_user.first_name or ''} {target_user.last_name or ''}".strip()
+        username = f"@{target_user.username}" if getattr(target_user, 'username', None) else "ندارد"
+        user_id = target_user.id
+        is_bot = "بله" if getattr(target_user, 'bot', False) else "خیر"
+        is_premium = "بله" if getattr(target_user, 'premium', False) else "خیر"
+
+        info_text = (
+            f"👤 **مشخصات حساب کاربری:**\n\n"
+            f"• نام: `{name}`\n"
+            f"• آیدی عددی: `{user_id}`\n"
+            f"• یوزرنیم: {username}\n"
+            f"• ربات است؟: {is_bot}\n"
+            f"• پرمیوم است؟: {is_premium}"
+        )
+        await event.edit(info_text)
+
+    except Exception as error:
+        await event.edit(f"❌ خطا در دریافت اطلاعات کاربر:\n{error}")
+
+# ============================================================
+# .TAG (TAG ACTIVE/ONLINE USERS IN GROUP)
+# ============================================================
+
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.tag(?:\s+(\d+))?$"))
+async def tag_users(event):
+    if not event.is_group and not event.is_channel:
+        await event.edit("❌ این دستور فقط در گروه‌ها یا سوپرگروه‌ها قابل استفاده است.")
+        return
+
+    match = event.pattern_match
+    count = int(match.group(1)) if match.group(1) else 10
+    if count > 50:
+        count = 50
+
+    await event.edit(f"⏳ در حال استخراج و تگ کردن {count} کاربر...")
+
+    users_to_tag = []
+    try:
+        async for user in client.iter_participants(event.chat_id, limit=100):
+            if user.bot or user.deleted:
+                continue
+            name = user.first_name or "دوست"
+            if user.username:
+                mention = f"@{user.username}"
+            else:
+                mention = f"[{name}](tg://user?id={user.id})"
+            
+            users_to_tag.append(mention)
+            if len(users_to_tag) >= count:
+                break
+
+        if not users_to_tag:
+            await event.edit("❌ کاربری برای تگ کردن یافت نشد.")
+            return
+
+        chunk_size = 5
+        for i in range(0, len(users_to_tag), chunk_size):
+            chunk = users_to_tag[i:i + chunk_size]
+            text = "👥 **دوستان عزیز:**\n" + " ".join(chunk)
+            await client.send_message(event.chat_id, text)
+            await asyncio.sleep(1.5)
+
+        await event.delete()
+    except Exception as error:
+        await event.edit(f"❌ خطا در تگ کردن کاربران:\n{error}")
+
+# ============================================================
+# .STOPALL (NEW: STOP ALL FEATURES GLOBALLY)
+# ============================================================
+
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopall$"))
+async def stop_all_features(event):
+    global fish_task_running, reply_rules, cat_chats, autoreact_rules
+
+    # متوقف کردن اتوماسیون ماهی
+    if fish_task_running:
+        fish_task_running.cancel()
+        fish_task_running = None
+
+    # پاک کردن تمام قوانین پاسخ خودکار در تمام چت‌ها
+    reply_rules.clear()
+
+    # پاک کردن تمام چت‌های حالت پیشی (.cat)
+    cat_chats.clear()
+
+    # پاک کردن تمام قوانین ریکشن خودکار در تمام چت‌ها
+    autoreact_rules.clear()
+
+    await event.edit(
+        "🛑 **تمام قابلیت‌های تنظیمی بات با موفقیت متوقف و پاکسازی شدند!**\n\n"
+        "• اتوماسیون ماهی متوقف شد.\n"
+        "• تمام پاسخ‌های خودکار (`.reply`) پاک شدند.\n"
+        "• تمام چت‌های حالت پیشی (`.cat`) غیرفعال شدند.\n"
+        "• تمام ریکشن‌های خودکار (`.autoreact`) متوقف شدند."
+    )
+
+# ============================================================
+# .STATUS (UPDATED)
 # ============================================================
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.status$"))
 async def bot_status_report(event):
     report = ["📊 **گزارش دقیق وضعیت سلف‌بات:**\n"]
 
-    # Cat chats
     if cat_chats:
         cat_lines = []
         for cid in cat_chats:
@@ -626,14 +759,12 @@ async def bot_status_report(event):
     else:
         report.append("🐱 **حالت .cat:** غیرفعال")
 
-    # Fish task
     global fish_task_running
     if fish_task_running and not fish_task_running.done():
-        report.append("🎣 **اتوماسیون .fish:** فعال (هر ۳۱ دقیقه - افسانه‌ای ⬅️ یخچال، عادی ⬅️ فروش)")
+        report.append("🎣 **اتوماسیون .fish:** فعال (افسانه‌ای ⬅️ یخچال، عادی ⬅️ فروش)")
     else:
         report.append("🎣 **اتوماسیون .fish:** غیرفعال")
 
-    # Reply rules
     if reply_rules:
         reply_lines = []
         for cid, rules in reply_rules.items():
@@ -643,7 +774,6 @@ async def bot_status_report(event):
     else:
         report.append("🤖 **پاسخ خودکار (.reply):** غیرفعال")
 
-    # Autoreact rules
     if autoreact_rules:
         react_lines = []
         for cid, rules in autoreact_rules.items():
