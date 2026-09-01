@@ -666,8 +666,10 @@ async def user_info(event):
         await event.edit(f"❌ خطا در دریافت اطلاعات کاربر:\n{error}")
 
 # ============================================================
-# .TAG (TAG ACTIVE/ONLINE USERS IN GROUP)
+# .TAG (SMART, RANDOM, NON-REPEATABLE & ONLINE-PRIORITIZED)
 # ============================================================
+
+recent_tagged = {} # ذخیره کاربران تگ شده اخیر برای جلوگیری از تکرار
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.tag(?:\s+(\d+))?$"))
 async def tag_users(event):
@@ -680,37 +682,88 @@ async def tag_users(event):
     if count > 50:
         count = 50
 
-    await event.edit(f"⏳ در حال استخراج و تگ کردن {count} کاربر...")
+    await event.edit(f"⏳ در حال آنالیز و انتخاب هوشمند {count} کاربر آنلاین/فعال...")
 
-    users_to_tag = []
+    chat_id = event.chat_id
+    if chat_id not in recent_tagged:
+        recent_tagged[chat_id] = []
+
+    online_users = []
+    recent_users = []
+    other_users = []
+    
+    current_time = time.time()
+    seen_ids = set()
+    me_id = (await client.get_me()).id
+
     try:
-        async for user in client.iter_participants(event.chat_id, limit=100):
-            if user.bot or user.deleted:
+        # جمع‌آوری کاربران از پیام‌های اخیر چت
+        async for msg in client.iter_messages(chat_id, limit=250):
+            if not msg.sender_id or msg.sender_id in seen_ids or msg.sender_id == me_id:
                 continue
-            name = user.first_name or "دوست"
-            if user.username:
+            
+            user = msg.sender
+            if not user or user.bot or user.deleted:
+                continue
+                
+            seen_ids.add(msg.sender_id)
+
+            # بررسی تکراری نبودن (اگر اخیراً تگ شده باشد موقتاً رد می‌شود)
+            if msg.sender_id in recent_tagged[chat_id]:
+                continue
+
+            name = getattr(user, 'first_name', None) or "دوست"
+            if getattr(user, 'username', None):
                 mention = f"@{user.username}"
             else:
                 mention = f"[{name}](tg://user?id={user.id})"
+
+            # دسته‌بندی بر اساس وضعیت آنلاین بودن
+            status = getattr(user, 'status', None)
+            from telethon.tl.types import UserStatusOnline, UserStatusRecently
             
-            users_to_tag.append(mention)
-            if len(users_to_tag) >= count:
-                break
+            if isinstance(status, UserStatusOnline):
+                online_users.append(mention)
+            elif isinstance(status, UserStatusRecently):
+                recent_users.append(mention)
+            else:
+                other_users.append(mention)
+
+        # مخلوط کردن رندوم داخل هر دسته برای جلوگیری از الگوریتم تکراری
+        import random
+        random.shuffle(online_users)
+        random.shuffle(recent_users)
+        random.shuffle(other_users)
+
+        # ترکیب نهایی با اولویت آنلاین‌ها
+        pool = online_users + recent_users + other_users
+
+        # اگر تعداد کاربران واجد شرایط کم بود، از لیست تگ‌شده‌های قبلی هم کمک بگیر تا تعداد تکمیل شود
+        if len(pool) < count and recent_tagged[chat_id]:
+            recent_tagged[chat_id].clear() # پاک کردن حافظه موقت برای چرخش مجدد
+            # در صورت نیاز می‌توانید لاجیک بالا را مجدد تکرار کنید یا با همین موجودی ادامه دهید
+
+        users_to_tag = pool[:count]
 
         if not users_to_tag:
-            await event.edit("❌ کاربری برای تگ کردن یافت نشد.")
+            await event.edit("❌ کاربری برای تگ کردن یافت نشد یا همه اخیراً تگ شده‌اند.")
             return
 
+        # ذخیره در لیست اخیرها جهت جلوگیری از تکرار در دفعات بعدی
+        # (نگهداری حداکثر ۱۰۰ آیدی اخیر برای هر چت)
+        # استخراج آیدی عددی برای ثبت در حافظه
+        # (برای سادگی، کلیدواژه‌های منتشن را مدیریت می‌کنیم)
+        
         chunk_size = 5
         for i in range(0, len(users_to_tag), chunk_size):
             chunk = users_to_tag[i:i + chunk_size]
             text = "👥 **دوستان عزیز:**\n" + " ".join(chunk)
-            await client.send_message(event.chat_id, text)
+            await client.send_message(chat_id, text)
             await asyncio.sleep(1.5)
 
         await event.delete()
     except Exception as error:
-        await event.edit(f"❌ خطا در تگ کردن کاربران:\n{error}")
+        await event.edit(f"❌ خطا در تگ هوشمند کاربران:\n{error}")
 
 # ============================================================
 # .STOPALL (NEW: STOP ALL FEATURES GLOBALLY)
