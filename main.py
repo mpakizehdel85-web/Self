@@ -238,7 +238,9 @@ COMMAND_DESCRIPTIONS = {
     ".stopautoreact": "توقف ریکشن خودکار",
     ".readmentions": "سین کردن منشن‌های این چت",
     ".userinfo": "اطلاعات حساب کاربر با ریپلای",
-    ".tag": "تگ کردن گروهی کاربران",
+    ".tag": "تگ کردن هوشمند کاربران",
+    ".kazino": "اتوماسیون کازینو و جک‌پات ۷۷۷",
+    ".stopkazino": "توقف اتوماسیون کازینو",
     ".stopall": "توقف تمام قابلیت‌های فعال در همه جا",
     ".status": "گزارش کامل وضعیت بات",
     ".i": "فهرست خلاصه دستورات",
@@ -395,7 +397,7 @@ async def cat_edited_message(event):
     await check_cat_message(event.message)
 
 # ============================================================
-# .DELETE (REPLACES .PURGE)
+# .DELETE
 # ============================================================
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.delete(?:\s+(\d+))?$"))
@@ -508,7 +510,7 @@ async def stop_fish_loop(event):
         await event.edit("❌ هیچ اتوماسیونی فعالی وجود ندارد.")
 
 # ============================================================
-# AUTO-REACTION FEATURE (SUPPORTING USERNAME, NUMERIC ID, & REPLY)
+# AUTO-REACTION FEATURE
 # ============================================================
 
 autoreact_rules = {}
@@ -584,45 +586,21 @@ async def handle_autoreact(event):
             break
 
 # ============================================================
-# .READMENTIONS (CURRENT CHAT ONLY)
+# .READMENTIONS
 # ============================================================
 
-@client.on(
-    events.NewMessage(
-        outgoing=True,
-        pattern=r"^\.readmentions$"
-    )
-)
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.readmentions$"))
 async def read_mentions(event):
-
-    await event.edit(
-        "⏳ در حال سین کردن منشن‌های این چت..."
-    )
-
+    await event.edit("⏳ در حال سین کردن منشن‌های این چت...")
     try:
-        await client(
-            functions.messages.ReadMentionsRequest(
-                peer=event.chat_id
-            )
-        )
-
-        await event.edit(
-            "✅ منشن‌های این چت با موفقیت سین شدند."
-        )
-
+        await client(functions.messages.ReadMentionsRequest(peer=event.chat_id))
+        await event.edit("✅ منشن‌های این چت با موفقیت سین شدند.")
     except Exception as error:
-
-        print(
-            "[READMENTIONS ERROR]",
-            error
-        )
-
-        await event.edit(
-            f"❌ خطا در سین کردن منشن‌های این چت:\n{error}"
-        )
+        print("[READMENTIONS ERROR]", error)
+        await event.edit(f"❌ خطا در سین کردن منشن‌های این چت:\n{error}")
 
 # ============================================================
-# .USERINFO (GET ID & USER DETAILS VIA REPLY OR USERNAME/ID)
+# .USERINFO
 # ============================================================
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.userinfo(?:\s|$)?"))
@@ -669,7 +647,7 @@ async def user_info(event):
 # .TAG (SMART, RANDOM, NON-REPEATABLE & ONLINE-PRIORITIZED)
 # ============================================================
 
-recent_tagged = {} # ذخیره کاربران تگ شده اخیر برای جلوگیری از تکرار
+recent_tagged = {}
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.tag(?:\s+(\d+))?$"))
 async def tag_users(event):
@@ -692,12 +670,10 @@ async def tag_users(event):
     recent_users = []
     other_users = []
     
-    current_time = time.time()
     seen_ids = set()
     me_id = (await client.get_me()).id
 
     try:
-        # جمع‌آوری کاربران از پیام‌های اخیر چت
         async for msg in client.iter_messages(chat_id, limit=250):
             if not msg.sender_id or msg.sender_id in seen_ids or msg.sender_id == me_id:
                 continue
@@ -708,7 +684,6 @@ async def tag_users(event):
                 
             seen_ids.add(msg.sender_id)
 
-            # بررسی تکراری نبودن (اگر اخیراً تگ شده باشد موقتاً رد می‌شود)
             if msg.sender_id in recent_tagged[chat_id]:
                 continue
 
@@ -718,42 +693,35 @@ async def tag_users(event):
             else:
                 mention = f"[{name}](tg://user?id={user.id})"
 
-            # دسته‌بندی بر اساس وضعیت آنلاین بودن
             status = getattr(user, 'status', None)
             from telethon.tl.types import UserStatusOnline, UserStatusRecently
             
             if isinstance(status, UserStatusOnline):
-                online_users.append(mention)
+                online_users.append((msg.sender_id, mention))
             elif isinstance(status, UserStatusRecently):
-                recent_users.append(mention)
+                recent_users.append((msg.sender_id, mention))
             else:
-                other_users.append(mention)
+                other_users.append((msg.sender_id, mention))
 
-        # مخلوط کردن رندوم داخل هر دسته برای جلوگیری از الگوریتم تکراری
         import random
         random.shuffle(online_users)
         random.shuffle(recent_users)
         random.shuffle(other_users)
 
-        # ترکیب نهایی با اولویت آنلاین‌ها
         pool = online_users + recent_users + other_users
-
-        # اگر تعداد کاربران واجد شرایط کم بود، از لیست تگ‌شده‌های قبلی هم کمک بگیر تا تعداد تکمیل شود
-        if len(pool) < count and recent_tagged[chat_id]:
-            recent_tagged[chat_id].clear() # پاک کردن حافظه موقت برای چرخش مجدد
-            # در صورت نیاز می‌توانید لاجیک بالا را مجدد تکرار کنید یا با همین موجودی ادامه دهید
-
-        users_to_tag = pool[:count]
+        
+        selected_pairs = pool[:count]
+        users_to_tag = [item[1] for item in selected_pairs]
 
         if not users_to_tag:
             await event.edit("❌ کاربری برای تگ کردن یافت نشد یا همه اخیراً تگ شده‌اند.")
             return
 
-        # ذخیره در لیست اخیرها جهت جلوگیری از تکرار در دفعات بعدی
-        # (نگهداری حداکثر ۱۰۰ آیدی اخیر برای هر چت)
-        # استخراج آیدی عددی برای ثبت در حافظه
-        # (برای سادگی، کلیدواژه‌های منتشن را مدیریت می‌کنیم)
-        
+        for uid, _ in selected_pairs:
+            recent_tagged[chat_id].append(uid)
+        if len(recent_tagged[chat_id]) > 100:
+            recent_tagged[chat_id] = recent_tagged[chat_id][-100:]
+
         chunk_size = 5
         for i in range(0, len(users_to_tag), chunk_size):
             chunk = users_to_tag[i:i + chunk_size]
@@ -766,37 +734,81 @@ async def tag_users(event):
         await event.edit(f"❌ خطا در تگ هوشمند کاربران:\n{error}")
 
 # ============================================================
-# .STOPALL (NEW: STOP ALL FEATURES GLOBALLY)
+# .KAZINO (HIGH-SPEED 777 JACKPOT AUTOMATION)
+# ============================================================
+
+kazino_active_chats = set()
+
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.kazino$"))
+async def start_kazino(event):
+    if not event.is_reply:
+        await event.edit("❌ لطفا روی پیام مربوط به اسلات/کازینو ریپلای کنید.")
+        return
+
+    reply_msg = await event.get_reply_message()
+    chat_id = event.chat_id
+    kazino_active_chats.add(chat_id)
+    
+    await event.edit("🎰 اتوماسیون کازینو برای رسیدن به جک‌پات ۷۷۷ فعال شد...")
+
+    try:
+        while chat_id in kazino_active_chats:
+            sent_msg = await reply_msg.reply("🎰")
+            await asyncio.sleep(1.1)
+            
+            updated_msg = await client.get_messages(chat_id, ids=sent_msg.id)
+            if not updated_msg:
+                continue
+                
+            text = updated_msg.text or ""
+            
+            if "777" in text:
+                kazino_active_chats.discard(chat_id)
+                await client.send_message(chat_id, "🎉 **جک‌پات ۷۷۷ با موفقیت بدست آمد!**")
+                break
+            
+            try:
+                await updated_msg.delete()
+            except Exception:
+                pass
+                
+    except Exception as error:
+        kazino_active_chats.discard(chat_id)
+        print("[KAZINO ERROR]", error)
+
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopkazino$"))
+async def stop_kazino(event):
+    kazino_active_chats.discard(event.chat_id)
+    await event.edit("🛑 عملیات کازینو و تلاش برای ۷۷۷ متوقف شد.")
+
+# ============================================================
+# .STOPALL (STOP ALL FEATURES GLOBALLY)
 # ============================================================
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopall$"))
 async def stop_all_features(event):
-    global fish_task_running, reply_rules, cat_chats, autoreact_rules
+    global fish_task_running, reply_rules, cat_chats, autoreact_rules, kazino_active_chats
 
-    # متوقف کردن اتوماسیون ماهی
     if fish_task_running:
         fish_task_running.cancel()
         fish_task_running = None
 
-    # پاک کردن تمام قوانین پاسخ خودکار در تمام چت‌ها
     reply_rules.clear()
-
-    # پاک کردن تمام چت‌های حالت پیشی (.cat)
     cat_chats.clear()
-
-    # پاک کردن تمام قوانین ریکشن خودکار در تمام چت‌ها
     autoreact_rules.clear()
+    kazino_active_chats.clear()
 
     await event.edit(
         "🛑 **تمام قابلیت‌های تنظیمی بات با موفقیت متوقف و پاکسازی شدند!**\n\n"
         "• اتوماسیون ماهی متوقف شد.\n"
-        "• تمام پاسخ‌های خودکار (`.reply`) پاک شدند.\n"
-        "• تمام چت‌های حالت پیشی (`.cat`) غیرفعال شدند.\n"
-        "• تمام ریکشن‌های خودکار (`.autoreact`) متوقف شدند."
+        "• پاسخ‌های خودکار (`.reply`) پاک شدند.\n"
+        "• حالت پیشی (`.cat`) غیرفعال شد.\n"
+        "• ریکشن‌های خودکار (`.autoreact`) متوقف شدند.\n"
+        "• اتوماسیون کازینو (`.kazino`) متوقف شد."
     )
 
 # ============================================================
-# .STATUS (UPDATED)
+# .STATUS
 # ============================================================
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.status$"))
@@ -814,7 +826,7 @@ async def bot_status_report(event):
 
     global fish_task_running
     if fish_task_running and not fish_task_running.done():
-        report.append("🎣 **اتوماسیون .fish:** فعال (افسانه‌ای ⬅️ یخچال، عادی ⬅️ فروش)")
+        report.append("🎣 **اتوماسیون .fish:** فعال")
     else:
         report.append("🎣 **اتوماسیون .fish:** غیرفعال")
 
@@ -835,6 +847,11 @@ async def bot_status_report(event):
         report.append("❤️ **ریکشن خودکار (.autoreact):**\n" + "\n".join(react_lines))
     else:
         report.append("❤️ **ریکشن خودکار (.autoreact):** غیرفعال")
+
+    if kazino_active_chats:
+        report.append("🎰 **اتوماسیون کازینو (.kazino):** فعال")
+    else:
+        report.append("🎰 **اتوماسیون کازینو (.kazino):** غیرفعال")
 
     await event.edit("\n".join(report), link_preview=False)
 
@@ -892,58 +909,3 @@ if __name__ == "__main__":
     except Exception as error:
         print("USERBOT ERROR:", error)
         raise
-
-# ============================================================
-# .KAZINO (HIGH-SPEED 777 JACKPOT AUTOMATION)
-# ============================================================
-
-kazino_active_chats = set()
-
-@client.on(events.NewMessage(outgoing=True, pattern=r"^\.kazino$"))
-async def start_kazino(event):
-    if not event.is_reply:
-        await event.edit("❌ لطفا روی پیام مربوط به اسلات/کازینو ریپلای کنید.")
-        return
-
-    reply_msg = await event.get_reply_message()
-    chat_id = event.chat_id
-    kazino_active_chats.add(chat_id)
-    
-    await event.delete() # پاک کردن دستور اولیه برای سرعت و تمیزی
-
-    try:
-        while chat_id in kazino_active_chats:
-            # ارسال سریع 🎰 با ریپلای روی پیام هدف
-            sent_msg = await reply_msg.reply("🎰")
-            
-            # کمی مکث کوتاه برای لود شدن انیمیشن و امتیاز اسلات توسط ربات کازینو
-            await asyncio.sleep(1.2)
-            
-            # بررسی پیام ارسال شده برای خواندن امتیاز
-            updated_msg = await client.get_messages(chat_id, ids=sent_msg.id)
-            
-            text = updated_msg.text or ""
-            media_text = getattr(updated_msg, 'media', None)
-            # استخراج امتیاز از متن یا کپشن پیام (یا دکمه‌ها اگر مقدار روی آن‌ها باشد)
-            # در تلگرام معمولاً امتیاز اسلات به صورت عدد یا متن زیر ایموجی قرار می‌گیرد
-            
-            # چک کردن وجود ست ۷۷۷ یا عدد ۷۷۷ در متن امتیاز
-            if "777" in text:
-                kazino_active_chats.discard(chat_id)
-                await client.send_message(chat_id, "🎉 **جک‌پات ۷۷۷ با موفقیت بدست آمد!**")
-                break
-            
-            # اگر ۷۷۷ نبود، با سرعت بالا پیام را پاک کرده و حلقه را تکرار کن
-            try:
-                await updated_msg.delete()
-            except Exception:
-                pass
-                
-    except Exception as error:
-        kazino_active_chats.discard(chat_id)
-        print("[KAZINO ERROR]", error)
-
-@client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopkazino$"))
-async def stop_kazino(event):
-    kazino_active_chats.discard(event.chat_id)
-    await event.edit("🛑 عملیات کازینو و تلاش برای ۷۷۷ متوقف شد.")
