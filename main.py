@@ -938,3 +938,89 @@ if __name__ == "__main__":
     except Exception as error:
         print("USERBOT ERROR:", error)
         raise
+
+# ============================================================
+# .ALGO (GENERAL PATTERN LEARNER & PREDICTOR)
+# ============================================================
+
+kazino_active_chats = set()
+
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.algo(?:\s+(\d+))?$"))
+async def start_algo(event):
+    match = event.pattern_match
+    target_predict = int(match.group(1)) if match.group(1) else 64  # پیش‌فرض عدد هدف ۶۴ است (قابل تغییر با .algo 12 یا .algo 6)
+
+    chat_id = event.chat_id
+    kazino_active_chats.add(chat_id)
+    
+    try:
+        await event.delete()
+    except Exception:
+        pass
+
+    history = []
+    pattern_map = {}
+    from telethon.tl.types import InputMediaDice
+    
+    try:
+        while chat_id in kazino_active_chats:
+            sent_msg = await client.send_message(
+                chat_id, 
+                file=InputMediaDice(emoticon="🎰")
+            )
+            
+            dice_value = None
+            if sent_msg.media and hasattr(sent_msg.media, 'value'):
+                dice_value = sent_msg.media.value
+            
+            if dice_value:
+                # ثبت توالی سه تایی قبلی و نتیجه ای که بعد از آن آمده
+                if len(history) >= 3:
+                    key = tuple(history[-3:])
+                    if key not in pattern_map:
+                        pattern_map[key] = []
+                    pattern_map[key].append(dice_value)
+                
+                history.append(dice_value)
+            
+            # پیش‌بینی بر اساس الگوی یاد گرفته شده
+            predicted_next = None
+            if len(history) >= 3:
+                current_key = tuple(history[-3:])
+                if current_key in pattern_map:
+                    # بررسی اینکه بیشترین تکرار بعد از این توالی چه عددی بوده است
+                    possible_nexts = pattern_map[current_key]
+                    if possible_nexts:
+                        # رایج‌ترین عدد بعدی در این الگو
+                        predicted_next = max(set(possible_nexts), key=possible_nexts.count)
+
+            # اگر الگوی یادگرفته شده پیش‌بینی کرد که عدد بعدی همان هدفِ مورد نظر شماست
+            if predicted_next == target_predict:
+                kazino_active_chats.discard(chat_id)
+                await client.send_message(
+                    chat_id, 
+                    f"🎯 **الگو شناسایی و پیش‌بینی شد!**\n"
+                    f"• توالی اخیر: `{history[-3:]}`\n"
+                    f"• پیش‌بینی عدد بعدی: **{target_predict}**\n"
+                    f"حالا خودت دستی پرتاب کن!"
+                )
+                break
+
+            try:
+                await sent_msg.delete()
+            except Exception:
+                pass
+                
+            await asyncio.sleep(0.05)
+                
+    except Exception as error:
+        kazino_active_chats.discard(chat_id)
+        print("[ALGO ERROR]", error)
+
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopalgo$"))
+async def stop_algo(event):
+    kazino_active_chats.discard(event.chat_id)
+    try:
+        await event.delete()
+    except Exception:
+        pass
