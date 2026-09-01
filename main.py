@@ -733,8 +733,8 @@ async def tag_users(event):
     except Exception as error:
         await event.edit(f"❌ خطا در تگ هوشمند کاربران:\n{error}")
 
-# ============================================================
-# .KAZINO (HIGH-SPEED 777 JACKPOT AUTOMATION)
+# ===# ============================================================
+# .KAZINO (ANIMATED 777 JACKPOT AUTOMATION)
 # ============================================================
 
 kazino_active_chats = set()
@@ -749,20 +749,36 @@ async def start_kazino(event):
     chat_id = event.chat_id
     kazino_active_chats.add(chat_id)
     
-    await event.edit("🎰 اتوماسیون کازینو برای رسیدن به جک‌پات ۷۷۷ فعال شد...")
+    await event.edit("🎰 اتوماسیون کازینو با اسلات متحرک فعال شد...")
 
     try:
+        from telethon.tl.types import InputMediaDice
+        
         while chat_id in kazino_active_chats:
-            sent_msg = await reply_msg.reply("🎰")
-            await asyncio.sleep(1.1)
+            # ارسال اسلات متحرک واقعی با ریپلای روی پیام هدف
+            sent_msg = await client.send_message(
+                chat_id, 
+                file=InputMediaDice(emoticon="🎰"), 
+                reply_to=reply_msg.id
+            )
             
+            # مکث برای کامل شدن انیمیشن اسلات تلگرام
+            await asyncio.sleep(2.5)
+            
+            # بررسی امتیاز دریافت شده از سرور
             updated_msg = await client.get_messages(chat_id, ids=sent_msg.id)
             if not updated_msg:
                 continue
                 
             text = updated_msg.text or ""
             
-            if "777" in text:
+            # بررسی جک‌پات (در تلگرام امتیاز اسلات معمولاً در media.value یا text ذخیره می‌شود)
+            dice_value = None
+            if hasattr(updated_msg, 'media') and hasattr(updated_msg.media, 'value'):
+                dice_value = updated_msg.media.value
+                
+            # مقدار جک‌پات ۷۷۷ در اسلات تلگرام معمولاً بالاترین مقدار (مثلاً ۶۴ یا بسته به ربات کازینو متن 777) است
+            if "777" in text or (dice_value and dice_value == 64):
                 kazino_active_chats.discard(chat_id)
                 await client.send_message(chat_id, "🎉 **جک‌پات ۷۷۷ با موفقیت بدست آمد!**")
                 break
@@ -780,6 +796,7 @@ async def start_kazino(event):
 async def stop_kazino(event):
     kazino_active_chats.discard(event.chat_id)
     await event.edit("🛑 عملیات کازینو و تلاش برای ۷۷۷ متوقف شد.")
+
 
 # ============================================================
 # .STOPALL (STOP ALL FEATURES GLOBALLY)
