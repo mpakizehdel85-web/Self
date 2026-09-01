@@ -892,3 +892,58 @@ if __name__ == "__main__":
     except Exception as error:
         print("USERBOT ERROR:", error)
         raise
+
+# ============================================================
+# .KAZINO (HIGH-SPEED 777 JACKPOT AUTOMATION)
+# ============================================================
+
+kazino_active_chats = set()
+
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.kazino$"))
+async def start_kazino(event):
+    if not event.is_reply:
+        await event.edit("❌ لطفا روی پیام مربوط به اسلات/کازینو ریپلای کنید.")
+        return
+
+    reply_msg = await event.get_reply_message()
+    chat_id = event.chat_id
+    kazino_active_chats.add(chat_id)
+    
+    await event.delete() # پاک کردن دستور اولیه برای سرعت و تمیزی
+
+    try:
+        while chat_id in kazino_active_chats:
+            # ارسال سریع 🎰 با ریپلای روی پیام هدف
+            sent_msg = await reply_msg.reply("🎰")
+            
+            # کمی مکث کوتاه برای لود شدن انیمیشن و امتیاز اسلات توسط ربات کازینو
+            await asyncio.sleep(1.2)
+            
+            # بررسی پیام ارسال شده برای خواندن امتیاز
+            updated_msg = await client.get_messages(chat_id, ids=sent_msg.id)
+            
+            text = updated_msg.text or ""
+            media_text = getattr(updated_msg, 'media', None)
+            # استخراج امتیاز از متن یا کپشن پیام (یا دکمه‌ها اگر مقدار روی آن‌ها باشد)
+            # در تلگرام معمولاً امتیاز اسلات به صورت عدد یا متن زیر ایموجی قرار می‌گیرد
+            
+            # چک کردن وجود ست ۷۷۷ یا عدد ۷۷۷ در متن امتیاز
+            if "777" in text:
+                kazino_active_chats.discard(chat_id)
+                await client.send_message(chat_id, "🎉 **جک‌پات ۷۷۷ با موفقیت بدست آمد!**")
+                break
+            
+            # اگر ۷۷۷ نبود، با سرعت بالا پیام را پاک کرده و حلقه را تکرار کن
+            try:
+                await updated_msg.delete()
+            except Exception:
+                pass
+                
+    except Exception as error:
+        kazino_active_chats.discard(chat_id)
+        print("[KAZINO ERROR]", error)
+
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopkazino$"))
+async def stop_kazino(event):
+    kazino_active_chats.discard(event.chat_id)
+    await event.edit("🛑 عملیات کازینو و تلاش برای ۷۷۷ متوقف شد.")
