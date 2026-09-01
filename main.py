@@ -733,8 +733,8 @@ async def tag_users(event):
     except Exception as error:
         await event.edit(f"❌ خطا در تگ هوشمند کاربران:\n{error}")
 
-# ===# ============================================================
-# .KAZINO (ANIMATED 777 JACKPOT AUTOMATION)
+# ============================================================
+# .KAZINO (MAX-SPEED INSTANT-CHECK 777 AUTOMATION)
 # ============================================================
 
 kazino_active_chats = set()
@@ -742,51 +742,52 @@ kazino_active_chats = set()
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.kazino$"))
 async def start_kazino(event):
     if not event.is_reply:
-        await event.edit("❌ لطفا روی پیام مربوط به اسلات/کازینو ریپلای کنید.")
+        try:
+            await event.delete()
+        except Exception:
+            pass
         return
 
     reply_msg = await event.get_reply_message()
     chat_id = event.chat_id
     kazino_active_chats.add(chat_id)
     
-    await event.edit("🎰 اتوماسیون کازینو با اسلات متحرک فعال شد...")
+    # دستور کاربر با سرعت بالا و بدون پاسخ پاک می‌شود
+    try:
+        await event.delete()
+    except Exception:
+        pass
 
     try:
         from telethon.tl.types import InputMediaDice
         
         while chat_id in kazino_active_chats:
-            # ارسال اسلات متحرک واقعی با ریپلای روی پیام هدف
+            # ارسال آنی تاس اسلات با ریپلای روی پیام هدف
             sent_msg = await client.send_message(
                 chat_id, 
                 file=InputMediaDice(emoticon="🎰"), 
                 reply_to=reply_msg.id
             )
             
-            # مکث برای کامل شدن انیمیشن اسلات تلگرام
-            await asyncio.sleep(2.5)
-            
-            # بررسی امتیاز دریافت شده از سرور
-            updated_msg = await client.get_messages(chat_id, ids=sent_msg.id)
-            if not updated_msg:
-                continue
-                
-            text = updated_msg.text or ""
-            
-            # بررسی جک‌پات (در تلگرام امتیاز اسلات معمولاً در media.value یا text ذخیره می‌شود)
+            # بررسی آنی مقدار مدیا بدون هیچ مکث و تاخیر
             dice_value = None
-            if hasattr(updated_msg, 'media') and hasattr(updated_msg.media, 'value'):
-                dice_value = updated_msg.media.value
+            if sent_msg.media and hasattr(sent_msg.media, 'value'):
+                dice_value = sent_msg.media.value
                 
-            # مقدار جک‌پات ۷۷۷ در اسلات تلگرام معمولاً بالاترین مقدار (مثلاً ۶۴ یا بسته به ربات کازینو متن 777) است
-            if "777" in text or (dice_value and dice_value == 64):
+            # مقدار ۶۴ در تاس اسلات تلگرام دقیقاً برابر با جک‌پات ۷۷۷ است
+            if dice_value == 64:
                 kazino_active_chats.discard(chat_id)
-                await client.send_message(chat_id, "🎉 **جک‌پات ۷۷۷ با موفقیت بدست آمد!**")
+                await client.send_message(chat_id, "🎉 **جک‌پات ۷۷۷ با موفقیت شکار شد!**")
                 break
             
+            # اگر ۷۷۷ نبود، با بالاترین سرعت ممکن حذفش کن
             try:
-                await updated_msg.delete()
+                await sent_msg.delete()
             except Exception:
                 pass
+                
+            # تنفس بسیار ناچیز به پردازنده برای جلوگیری از قفل شدن لوپ
+            await asyncio.sleep(0.02)
                 
     except Exception as error:
         kazino_active_chats.discard(chat_id)
@@ -795,8 +796,10 @@ async def start_kazino(event):
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopkazino$"))
 async def stop_kazino(event):
     kazino_active_chats.discard(event.chat_id)
-    await event.edit("🛑 عملیات کازینو و تلاش برای ۷۷۷ متوقف شد.")
-
+    try:
+        await event.delete()
+    except Exception:
+        pass
 
 # ============================================================
 # .STOPALL (STOP ALL FEATURES GLOBALLY)
