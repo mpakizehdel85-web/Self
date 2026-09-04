@@ -234,6 +234,8 @@ COMMAND_DESCRIPTIONS = {
     ".uptime": "آب‌تایم بات",
     ".fish": "اتوماسیون ماهی خودکار",
     ".stopfish": "توقف اتوماسیون ماهی",
+    ".automeo": "ارسال خودکار meo هر ۵ دقیقه",
+    ".stopautomeo": "توقف ارسال خودکار meo",
     ".autoreact": "تنظیم ریکشن خودکار",
     ".stopautoreact": "توقف ریکشن خودکار",
     ".readmentions": "سین کردن منشن‌های این چت",
@@ -510,6 +512,42 @@ async def stop_fish_loop(event):
         await event.edit("❌ هیچ اتوماسیونی فعالی وجود ندارد.")
 
 # ============================================================
+# .AUTOMEO (AUTO MEO EVERY 5 MINUTES)
+# ============================================================
+
+automeo_tasks = {}
+
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.automeo$"))
+async def start_automeo(event):
+    chat_id = event.chat_id
+    if chat_id in automeo_tasks:
+        await event.edit("⚠️ ارسال خودکار meo از قبل در این چت فعال است.")
+        return
+
+    await event.edit("🐱 **ارسال خودکار meo هر ۵ دقیقه فعال شد.**")
+
+    async def meo_loop():
+        while True:
+            try:
+                await client.send_message(chat_id, "meo")
+            except Exception as err:
+                print("[AUTOMEO ERROR]", err)
+            await asyncio.sleep(300)  # 5 minutes
+
+    task = asyncio.create_task(meo_loop())
+    automeo_tasks[chat_id] = task
+
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopautomeo$"))
+async def stop_automeo(event):
+    chat_id = event.chat_id
+    task = automeo_tasks.pop(chat_id, None)
+    if task:
+        task.cancel()
+        await event.edit("🛑 ارسال خودکار meo در این چت متوقف شد.")
+    else:
+        await event.edit("❌ هیچ ارسال خودکاری در این چت فعال نیست.")
+
+# ============================================================
 # AUTO-REACTION FEATURE
 # ============================================================
 
@@ -644,7 +682,7 @@ async def user_info(event):
         await event.edit(f"❌ خطا در دریافت اطلاعات کاربر:\n{error}")
 
 # ============================================================
-# .TAG (SMART, RANDOM, NON-REPEATABLE & ONLINE-PRIORITIZED)
+# .TAG (SMART, NON-REPEATABLE & FULL COUNT WITH PRIORITY)
 # ============================================================
 
 recent_tagged = {}
@@ -656,25 +694,26 @@ async def tag_users(event):
         return
 
     match = event.pattern_match
-    count = int(match.group(1)) if match.group(1) else 10
-    if count > 50:
-        count = 50
+    requested_count = int(match.group(1)) if match.group(1) else 10
+    if requested_count > 100:
+        requested_count = 100
 
-    await event.edit(f"⏳ در حال آنالیز و انتخاب هوشمند {count} کاربر آنلاین/فعال...")
+    await event.edit(f"⏳ در حال استخراج و مرتب‌سازی هوشمند کاربران...")
 
     chat_id = event.chat_id
     if chat_id not in recent_tagged:
         recent_tagged[chat_id] = []
 
-    online_users = []
-    recent_users = []
-    other_users = []
+    online_pool = []
+    recent_pool = []
+    other_pool = []
     
     seen_ids = set()
     me_id = (await client.get_me()).id
 
     try:
-        async for msg in client.iter_messages(chat_id, limit=250):
+        # جمع‌آوری کاربران از پیام‌های اخیر
+        async for msg in client.iter_messages(chat_id, limit=300):
             if not msg.sender_id or msg.sender_id in seen_ids or msg.sender_id == me_id:
                 continue
             
@@ -697,30 +736,56 @@ async def tag_users(event):
             from telethon.tl.types import UserStatusOnline, UserStatusRecently
             
             if isinstance(status, UserStatusOnline):
-                online_users.append((msg.sender_id, mention))
+                online_pool.append((msg.sender_id, mention))
             elif isinstance(status, UserStatusRecently):
-                recent_users.append((msg.sender_id, mention))
+                recent_pool.append((msg.sender_id, mention))
             else:
-                other_users.append((msg.sender_id, mention))
+                other_pool.append((msg.sender_id, mention))
+
+        # اگر از طریق پیام‌ها به تعداد درخواستی نرسیدیم، از لیست کامل اعضای گروه هم استفاده می‌کنیم
+        if len(online_pool) + len(recent_pool) + len(other_pool) < requested_count:
+            async for user in client.iter_participants(chat_id):
+                if not user or user.bot or user.deleted or user.id == me_id or user.id in seen_ids:
+                    continue
+                if user.id in recent_tagged[chat_id]:
+                    continue
+                
+                seen_ids.add(user.id)
+                name = getattr(user, 'first_name', None) or "دوست"
+                if getattr(user, 'username', None):
+                    mention = f"@{user.username}"
+                else:
+                    mention = f"[{name}](tg://user?id={user.id})"
+                
+                status = getattr(user, 'status', None)
+                from telethon.tl.types import UserStatusOnline, UserStatusRecently
+                if isinstance(status, UserStatusOnline):
+                    online_pool.append((user.id, mention))
+                elif isinstance(status, UserStatusRecently):
+                    recent_pool.append((user.id, mention))
+                else:
+                    other_pool.append((user.id, mention))
 
         import random
-        random.shuffle(online_users)
-        random.shuffle(recent_users)
-        random.shuffle(other_users)
+        random.shuffle(online_pool)
+        random.shuffle(recent_pool)
+        random.shuffle(other_pool)
 
-        pool = online_users + recent_users + other_users
-        
-        selected_pairs = pool[:count]
+        # ترکیب با حفظ کامل اولویت (آنلاین -> اخیراً -> سایر) تا دقیقاً تعداد درخواستی تکمیل شود
+        full_pool = online_pool + recent_pool + other_pool
+        selected_pairs = full_pool[:requested_count]
         users_to_tag = [item[1] for item in selected_pairs]
 
         if not users_to_tag:
-            await event.edit("❌ کاربری برای تگ کردن یافت نشد یا همه اخیراً تگ شده‌اند.")
+            # اگر تمام کاربران قبلاً تگ شده بود و لیست تاریخچه پر بود، حافظه موقت را پاک می‌کنیم تا دوباره تگ شوند
+            recent_tagged[chat_id].clear()
+            await event.edit("🔄 لیست تگ‌های قبلی پاک شد، لطفاً مجدداً دستور `.tag` را ارسال کنید.")
             return
 
         for uid, _ in selected_pairs:
             recent_tagged[chat_id].append(uid)
-        if len(recent_tagged[chat_id]) > 100:
-            recent_tagged[chat_id] = recent_tagged[chat_id][-100:]
+        if len(recent_tagged[chat_id]) > 150:
+            recent_tagged[chat_id] = recent_tagged[chat_id][-150:]
 
         chunk_size = 5
         for i in range(0, len(users_to_tag), chunk_size):
@@ -814,11 +879,15 @@ async def stop_kazino(event):
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopall$"))
 async def stop_all_features(event):
-    global fish_task_running, reply_rules, cat_chats, autoreact_rules, kazino_active_chats
+    global fish_task_running, reply_rules, cat_chats, autoreact_rules, kazino_active_chats, automeo_tasks
 
     if fish_task_running:
         fish_task_running.cancel()
         fish_task_running = None
+
+    for task in automeo_tasks.values():
+        task.cancel()
+    automeo_tasks.clear()
 
     reply_rules.clear()
     cat_chats.clear()
@@ -828,6 +897,7 @@ async def stop_all_features(event):
     await event.edit(
         "🛑 **تمام قابلیت‌های تنظیمی بات با موفقیت متوقف و پاکسازی شدند!**\n\n"
         "• اتوماسیون ماهی متوقف شد.\n"
+        "• ارسال خودکار meo متوقف شد.\n"
         "• پاسخ‌های خودکار (`.reply`) پاک شدند.\n"
         "• حالت پیشی (`.cat`) غیرفعال شد.\n"
         "• ریکشن‌های خودکار (`.autoreact`) متوقف شدند.\n"
@@ -856,6 +926,15 @@ async def bot_status_report(event):
         report.append("🎣 **اتوماسیون .fish:** فعال")
     else:
         report.append("🎣 **اتوماسیون .fish:** غیرفعال")
+
+    if automeo_tasks:
+        meo_lines = []
+        for cid in automeo_tasks.keys():
+            info = await get_chat_display_info(cid)
+            meo_lines.append(f"  • {info}")
+        report.append("🐱 **ارسال خودکار meo (.automeo):**\n" + "\n".join(meo_lines))
+    else:
+        report.append("🐱 **ارسال خودکار meo (.automeo):** غیرفعال")
 
     if reply_rules:
         reply_lines = []
