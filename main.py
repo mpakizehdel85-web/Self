@@ -12,8 +12,6 @@ from urllib.parse import parse_qs
 from telethon import TelegramClient, events, functions
 from telethon.errors import SessionPasswordNeededError
 from telethon.sessions import StringSession
-from googletrans import Translator
-import emoji
 
 # ============================================================
 # SETTINGS
@@ -27,7 +25,6 @@ TELEGRAM_SESSION = os.environ.get("TELEGRAM_SESSION", "").strip()
 PASSWORD_2FA = os.environ.get("TELEGRAM_2FA_PASSWORD", "")
 PORT = int(os.environ.get("PORT", "8000"))
 START_TIME = time.time()
-translator = Translator()
 
 # ============================================================
 # TELEGRAM CLIENT
@@ -206,10 +203,6 @@ async def authenticate():
     set_login_state("authenticated", "Authentication successful.")
     print("[LOGIN] Authentication successful.")
 
-# ============================================================
-# HELPER FOR CHAT TITLE/LINK
-# ============================================================
-
 async def get_chat_display_info(chat_id):
     try:
         chat = await client.get_entity(chat_id)
@@ -220,8 +213,7 @@ async def get_chat_display_info(chat_id):
             return f"{name} (`{chat_id}`)"
     except Exception:
         return f"Chat ID: `{chat_id}`"
-
-# ============================================================
+        # ============================================================
 # COMMAND REGISTRY
 # ============================================================
 
@@ -230,10 +222,10 @@ COMMAND_DESCRIPTIONS = {
     ".set": "زمان‌بندی ارسال پیام",
     ".reply": "تنظیم پاسخ خودکار",
     ".stopreply": "توقف پاسخ خودکار",
-    ".cat": "حالت نجات پیشی (مخفی)",
+    ".cat": "حالت نجات پیشی (مخفی و خودکار)",
     ".stopcat": "توقف نجات پیشی",
-    ".khofash": "فعال‌سازی شکارچی خودکار خفاش (مخفی)",
-    ".stopkhofash": "توقف شکارچی خفاش",
+    ".khofash": "حالت شکار خفاش (مخفی و خودکار بر اساس کد ۳۸ گانه)",
+    ".stopkhofash": "توقف شکار خفاش",
     ".delete": "پاکسازی پیام‌ها",
     ".save": "ذخیره پیام در سیو مسیج",
     ".uptime": "آب‌تایم بات",
@@ -245,7 +237,7 @@ COMMAND_DESCRIPTIONS = {
     ".stopautoreact": "توقف ریکشن خودکار",
     ".readmentions": "سین کردن منشن‌های این چت",
     ".userinfo": "اطلاعات حساب کاربر با ریپلای",
-    ".tag": "تگ کردن هوشمند کاربران",
+    ".tag": "تگ کردن هوشمند کاربران (حفظ اولویت و تعداد دقیق)",
     ".kazino": "اتوماسیون کازینو",
     ".stopkazino": "توقف اتوماسیون کازینو",
     ".stopall": "توقف تمام قابلیت‌های فعال",
@@ -404,10 +396,30 @@ async def cat_edited_message(event):
     await check_cat_message(event.message)
 
 # ============================================================
-# .KHOFASH (SMART & SILENT BAT HUNTER)
+# .KHOFASH (BAT GAME AUTO-HUNTER BY CODE WITH NEW BAT DETECTOR)
 # ============================================================
 
 khofash_chats = set()
+
+# دیکشنری خفاش‌ها بر اساس شماره کد آن‌ها
+BAT_CODE_MAPPING = {
+    2: "🧄",   # خون آشام
+    7: "🌦",   # رعد و برق
+    8: "💨",   # دود
+    9: "⚫️",   # کهکشان
+    10: "🕷",  # حشره
+    13: "💙",  # صورتی
+    20: "🍋",  # آشپز
+    22: "🗻",  # کوهنورد
+    23: "🪞",  # روح
+    24: "🃏",  # بتمن
+    27: "🌕",  # گرگینه
+    29: "🧊",  # مذاب
+    32: "🔥",  # یخبندون
+    33: "🇫🇷",  # تلگرام
+    37: "⚡️",  # پیکاچو
+    38: "🌑",  # روشنایی
+}
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.khofash$"))
 async def start_khofash(event):
@@ -423,32 +435,34 @@ async def stop_khofash(event):
     await event.edit("🛑 شکارچی خفاش متوقف شد.")
 
 async def process_khofash_message(message):
-    if message.chat_id not in khofash_chats:
-        return
-    
     text = message.raw_text or ""
-    if "میترسه" in text and "خفاش" in text:
-        match = re.search(r"از\s+(.+?)\s+میترسه", text)
-        if match:
-            fear_item = match.group(1).strip()
-            try:
-                # ترجمه هوشمند به انگلیسی و تبدیل به ایموجی
-                translated = translator.translate(fear_item, src='fa', dest='en')
-                english_word = translated.text.strip().lower().replace(" ", "_")
+    
+    if message.chat_id in khofash_chats:
+        if "خفاش" in text and "شکار شد" in text:
+            code_match = re.search(r"کد\s*:\s*(\d+)", text)
+            name_match = re.search(r"خفاش\s+شکار\s+شده\s*:\s*(.+?)\s*\(کد", text)
+            
+            if code_match:
+                bat_code = int(code_match.group(1))
+                emoji = BAT_CODE_MAPPING.get(bat_code)
                 
-                # رفع استثنای خاص مثل سیاه چاله که ممکن است در ترجمه گوگل متفاوت شود
-                if "سیاه" in fear_item and "چاله" in fear_item:
-                    generated_emoji = "🕳️"
+                if emoji:
+                    try:
+                        await message.reply(emoji)
+                    except Exception as err:
+                        print("[KHOFASH ERROR]", err)
                 else:
-                    emoji_code = f":{english_word}:"
-                    generated_emoji = emoji.emojize(emoji_code, language='alias')
-                    if generated_emoji == emoji_code:
-                        generated_emoji = "🦇" # پیش‌فرض اگر پیدا نشد
-                
-                await asyncio.sleep(0.2) # تاخیر خیلی کوتاه برای بالاترین سرعت و دقت
-                await message.reply(generated_emoji)
-            except Exception as err:
-                print("[KHOFASH ERROR]", err)
+                    try:
+                        bat_name = name_match.group(1).strip() if name_match else "نامشخص"
+                        alert_text = (
+                            f"🦇 **خفاش جدید شناسایی شد!**\n\n"
+                            f"• نام: `{bat_name}`\n"
+                            f"• کد: `{bat_code}`\n\n"
+                            f"متن کامل:\n{text}"
+                        )
+                        await client.send_message("me", alert_text)
+                    except Exception as err:
+                        print("[NEW BAT ALERT ERROR]", err)
 
 @client.on(events.NewMessage())
 async def khofash_new_message(event):
@@ -457,7 +471,6 @@ async def khofash_new_message(event):
 @client.on(events.MessageEdited())
 async def khofash_edited_message(event):
     await process_khofash_message(event.message)
-
 # ============================================================
 # .DELETE
 # ============================================================
@@ -619,27 +632,27 @@ async def set_autoreact(event):
     match = re.match(r"^\.autoreact\s+(.+?)\s+([^\s]+)$", cmd_text)
     
     target = None
-    emoji_char = None
+    emoji = None
 
     if match:
         target = match.group(1).strip()
-        emoji_char = match.group(2).strip()
+        emoji = match.group(2).strip()
     elif event.is_reply:
         parts = cmd_text.split()
         if len(parts) == 2:
-            emoji_char = parts[1].strip()
+            emoji = parts[1].strip()
             reply_msg = await event.get_reply_message()
             if reply_msg and reply_msg.sender_id:
                 target = str(reply_msg.sender_id)
 
-    if not target or not emoji_char:
+    if not target or not emoji:
         await event.edit("❌ فرمت اشتباه.")
         return
 
     if event.chat_id not in autoreact_rules:
         autoreact_rules[event.chat_id] = {}
 
-    autoreact_rules[event.chat_id][target.casefold()] = emoji_char
+    autoreact_rules[event.chat_id][target.casefold()] = emoji
     await event.edit(f"✅ ریکشن خودکار فعال شد.")
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopautoreact$"))
@@ -659,7 +672,7 @@ async def handle_autoreact(event):
     sender_username = f"@{sender.username}".casefold() if sender and getattr(sender, 'username', None) else ""
     msg_text = event.raw_text or ""
 
-    for target, emoji_char in rules.items():
+    for target, emoji in rules.items():
         t_clean = target.casefold()
         matched = False
 
@@ -677,7 +690,7 @@ async def handle_autoreact(event):
                 await client(SendReactionRequest(
                     peer=event.chat_id,
                     msg_id=event.id,
-                    reaction=[ReactionEmoji(emoticon=emoji_char)]
+                    reaction=[ReactionEmoji(emoticon=emoji)]
                 ))
             except Exception as err:
                 print("[AUTOREACT ERROR]", err)
@@ -742,7 +755,7 @@ async def user_info(event):
         await event.edit(f"❌ خطا:\n{error}")
 
 # ============================================================
-# .TAG
+# .TAG (SMART, NON-REPEATABLE & FULL COUNT WITH PRIORITY)
 # ============================================================
 
 recent_tagged = {}
@@ -863,7 +876,7 @@ kazino_active_chats = set()
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.kazino(?:\s+(.+))?$"))
 async def start_kazino(event):
     match = event.pattern_match
-    emoji_dice = match.group(1).strip() if match.group(1) else "🎰"
+    emoji = match.group(1).strip() if match.group(1) else "🎰"
     
     target_values = {
         "🎰": 64,
@@ -874,7 +887,7 @@ async def start_kazino(event):
         "⚽": 5
     }
     
-    winning_value = target_values.get(emoji_dice, 6)
+    winning_value = target_values.get(emoji, 6)
 
     if not event.is_reply:
         try:
@@ -898,7 +911,7 @@ async def start_kazino(event):
         while chat_id in kazino_active_chats:
             sent_msg = await client.send_message(
                 chat_id, 
-                file=InputMediaDice(emoticon=emoji_dice), 
+                file=InputMediaDice(emoticon=emoji), 
                 reply_to=reply_msg.id
             )
             
@@ -952,7 +965,14 @@ async def stop_all_features(event):
     khofash_chats.clear()
 
     await event.edit(
-        "🛑 **تمام قابلیت‌های تنظیمی بات با موفقیت متوقف و پاکسازی شدند!**"
+        "🛑 **تمام قابلیت‌های تنظیمی بات با موفقیت متوقف و پاکسازی شدند!**\n\n"
+        "• اتوماسیون ماهی متوقف شد.\n"
+        "• ارسال خودکار meo متوقف شد.\n"
+        "• پاسخ‌های خودکار پاک شدند.\n"
+        "• حالت پیشی غیرفعال شد.\n"
+        "• شکارچی خفاش متوقف شد.\n"
+        "• ریکشن‌های خودکار متوقف شدند.\n"
+        "• اتوماسیون کازینو متوقف شد."
     )
 
 # ============================================================
@@ -964,12 +984,20 @@ async def bot_status_report(event):
     report = ["📊 **گزارش دقیق وضعیت سلف‌بات:**\n"]
 
     if cat_chats:
-        report.append("🐱 **حالت .cat:** فعال")
+        cat_lines = []
+        for cid in cat_chats:
+            info = await get_chat_display_info(cid)
+            cat_lines.append(f"  • {info}")
+        report.append(f"🐱 **حالت .cat (فعال - مخفی):**\n" + "\n".join(cat_lines))
     else:
         report.append("🐱 **حالت .cat:** غیرفعال")
 
     if khofash_chats:
-        report.append("🦇 **شکارچی خفاش (.khofash):** فعال")
+        kh_lines = []
+        for cid in khofash_chats:
+            info = await get_chat_display_info(cid)
+            kh_lines.append(f"  • {info}")
+        report.append("🦇 **شکارچی خفاش (.khofash - مخفی):**\n" + "\n".join(kh_lines))
     else:
         report.append("🦇 **شکارچی خفاش (.khofash):** غیرفعال")
 
@@ -978,6 +1006,38 @@ async def bot_status_report(event):
         report.append("🎣 **اتوماسیون .fish:** فعال")
     else:
         report.append("🎣 **اتوماسیون .fish:** غیرفعال")
+
+    if automeo_tasks:
+        meo_lines = []
+        for cid in automeo_tasks.keys():
+            info = await get_chat_display_info(cid)
+            meo_lines.append(f"  • {info}")
+        report.append("🐱 **ارسال خودکار meo (.automeo):**\n" + "\n".join(meo_lines))
+    else:
+        report.append("🐱 **ارسال خودکار meo (.automeo):** غیرفعال")
+
+    if reply_rules:
+        reply_lines = []
+        for cid, rules in reply_rules.items():
+            info = await get_chat_display_info(cid)
+            reply_lines.append(f"  • چت {info} ({len(rules)} قانون)")
+        report.append("🤖 **پاسخ خودکار (.reply):**\n" + "\n".join(reply_lines))
+    else:
+        report.append("🤖 **پاسخ خودکار (.reply):** غیرفعال")
+
+    if autoreact_rules:
+        react_lines = []
+        for cid, rules in autoreact_rules.items():
+            info = await get_chat_display_info(cid)
+            react_lines.append(f"  • چت {info} ({len(rules)} قانون)")
+        report.append("❤️ **ریکشن خودکار (.autoreact):**\n" + "\n".join(react_lines))
+    else:
+        report.append("❤️ **ریکشن خودکار (.autoreact):** غیرفعال")
+
+    if kazino_active_chats:
+        report.append("🎰 **اتوماسیون کازینو (.kazino):** فعال")
+    else:
+        report.append("🎰 **اتوماسیون کازینو (.kazino):** غیرفعال")
 
     await event.edit("\n".join(report), link_preview=False)
 
@@ -1027,7 +1087,9 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("Userbot stopped.")
+        print("Userbot stopped. Exiting.")
     except Exception as error:
         print("USERBOT ERROR:", error)
         raise
+
+
