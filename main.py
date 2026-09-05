@@ -12,6 +12,8 @@ from urllib.parse import parse_qs
 from telethon import TelegramClient, events, functions
 from telethon.errors import SessionPasswordNeededError
 from telethon.sessions import StringSession
+from googletrans import Translator
+import emoji
 
 # ============================================================
 # SETTINGS
@@ -25,6 +27,7 @@ TELEGRAM_SESSION = os.environ.get("TELEGRAM_SESSION", "").strip()
 PASSWORD_2FA = os.environ.get("TELEGRAM_2FA_PASSWORD", "")
 PORT = int(os.environ.get("PORT", "8000"))
 START_TIME = time.time()
+translator = Translator()
 
 # ============================================================
 # TELEGRAM CLIENT
@@ -219,7 +222,7 @@ async def get_chat_display_info(chat_id):
         return f"Chat ID: `{chat_id}`"
 
 # ============================================================
-# COMMAND REGISTRY & .I / .STATUS HELPERS
+# COMMAND REGISTRY
 # ============================================================
 
 COMMAND_DESCRIPTIONS = {
@@ -229,6 +232,8 @@ COMMAND_DESCRIPTIONS = {
     ".stopreply": "توقف پاسخ خودکار",
     ".cat": "حالت نجات پیشی (مخفی)",
     ".stopcat": "توقف نجات پیشی",
+    ".khofash": "فعال‌سازی شکارچی خودکار خفاش (مخفی)",
+    ".stopkhofash": "توقف شکارچی خفاش",
     ".delete": "پاکسازی پیام‌ها",
     ".save": "ذخیره پیام در سیو مسیج",
     ".uptime": "آب‌تایم بات",
@@ -241,9 +246,9 @@ COMMAND_DESCRIPTIONS = {
     ".readmentions": "سین کردن منشن‌های این چت",
     ".userinfo": "اطلاعات حساب کاربر با ریپلای",
     ".tag": "تگ کردن هوشمند کاربران",
-    ".kazino": "اتوماسیون کازینو (مثلا .kazino 🎰)",
+    ".kazino": "اتوماسیون کازینو",
     ".stopkazino": "توقف اتوماسیون کازینو",
-    ".stopall": "توقف تمام قابلیت‌های فعال در همه جا",
+    ".stopall": "توقف تمام قابلیت‌های فعال",
     ".status": "گزارش کامل وضعیت بات",
     ".i": "فهرست خلاصه دستورات",
     ".ping": "بررسی آنلاین بودن",
@@ -399,6 +404,61 @@ async def cat_edited_message(event):
     await check_cat_message(event.message)
 
 # ============================================================
+# .KHOFASH (SMART & SILENT BAT HUNTER)
+# ============================================================
+
+khofash_chats = set()
+
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.khofash$"))
+async def start_khofash(event):
+    khofash_chats.add(event.chat_id)
+    try:
+        await event.delete()
+    except Exception:
+        pass
+
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopkhofash$"))
+async def stop_khofash(event):
+    khofash_chats.discard(event.chat_id)
+    await event.edit("🛑 شکارچی خفاش متوقف شد.")
+
+async def process_khofash_message(message):
+    if message.chat_id not in khofash_chats:
+        return
+    
+    text = message.raw_text or ""
+    if "میترسه" in text and "خفاش" in text:
+        match = re.search(r"از\s+(.+?)\s+میترسه", text)
+        if match:
+            fear_item = match.group(1).strip()
+            try:
+                # ترجمه هوشمند به انگلیسی و تبدیل به ایموجی
+                translated = translator.translate(fear_item, src='fa', dest='en')
+                english_word = translated.text.strip().lower().replace(" ", "_")
+                
+                # رفع استثنای خاص مثل سیاه چاله که ممکن است در ترجمه گوگل متفاوت شود
+                if "سیاه" in fear_item and "چاله" in fear_item:
+                    generated_emoji = "🕳️"
+                else:
+                    emoji_code = f":{english_word}:"
+                    generated_emoji = emoji.emojize(emoji_code, language='alias')
+                    if generated_emoji == emoji_code:
+                        generated_emoji = "🦇" # پیش‌فرض اگر پیدا نشد
+                
+                await asyncio.sleep(0.2) # تاخیر خیلی کوتاه برای بالاترین سرعت و دقت
+                await message.reply(generated_emoji)
+            except Exception as err:
+                print("[KHOFASH ERROR]", err)
+
+@client.on(events.NewMessage())
+async def khofash_new_message(event):
+    await process_khofash_message(event.message)
+
+@client.on(events.MessageEdited())
+async def khofash_edited_message(event):
+    await process_khofash_message(event.message)
+
+# ============================================================
 # .DELETE
 # ============================================================
 
@@ -486,11 +546,11 @@ async def start_fish_loop(event):
     interval_seconds = parse_interval(interval_str)
     
     if interval_seconds is None or interval_seconds <= 0:
-        await event.edit("❌ فرمت زمان نامعتبر است. از s (ثانیه)، m (دقیقه) یا h (ساعت) استفاده کنید.")
+        await event.edit("❌ فرمت زمان نامعتبر است.")
         return
 
     chat_id = event.chat_id
-    await event.edit(f"🎣 اتوماسیون ماهی فعال شد (هر {interval_str} یک‌بار | افسانه‌ای ⬅️ یخچال، عادی ⬅️ فروش).")
+    await event.edit(f"🎣 اتوماسیون ماهی فعال شد (هر {interval_str} یک‌بار).")
 
     async def loop_job():
         while True:
@@ -532,7 +592,7 @@ async def start_automeo(event):
                 await client.send_message(chat_id, "meo")
             except Exception as err:
                 print("[AUTOMEO ERROR]", err)
-            await asyncio.sleep(300)  # 5 minutes
+            await asyncio.sleep(300)
 
     task = asyncio.create_task(meo_loop())
     automeo_tasks[chat_id] = task
@@ -559,28 +619,28 @@ async def set_autoreact(event):
     match = re.match(r"^\.autoreact\s+(.+?)\s+([^\s]+)$", cmd_text)
     
     target = None
-    emoji = None
+    emoji_char = None
 
     if match:
         target = match.group(1).strip()
-        emoji = match.group(2).strip()
+        emoji_char = match.group(2).strip()
     elif event.is_reply:
         parts = cmd_text.split()
         if len(parts) == 2:
-            emoji = parts[1].strip()
+            emoji_char = parts[1].strip()
             reply_msg = await event.get_reply_message()
             if reply_msg and reply_msg.sender_id:
                 target = str(reply_msg.sender_id)
 
-    if not target or not emoji:
-        await event.edit("❌ فرمت اشتباه.\nمثال:\n`.autoreact @username ❤️`\nیا روی پیام شخص ریپلای کنید و بنویسید:\n`.autoreact ❤️`")
+    if not target or not emoji_char:
+        await event.edit("❌ فرمت اشتباه.")
         return
 
     if event.chat_id not in autoreact_rules:
         autoreact_rules[event.chat_id] = {}
 
-    autoreact_rules[event.chat_id][target.casefold()] = emoji
-    await event.edit(f"✅ ریکشن خودکار فعال شد.\nهدف: {target}\nایموجی: {emoji}")
+    autoreact_rules[event.chat_id][target.casefold()] = emoji_char
+    await event.edit(f"✅ ریکشن خودکار فعال شد.")
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopautoreact$"))
 async def stop_autoreact(event):
@@ -599,7 +659,7 @@ async def handle_autoreact(event):
     sender_username = f"@{sender.username}".casefold() if sender and getattr(sender, 'username', None) else ""
     msg_text = event.raw_text or ""
 
-    for target, emoji in rules.items():
+    for target, emoji_char in rules.items():
         t_clean = target.casefold()
         matched = False
 
@@ -617,7 +677,7 @@ async def handle_autoreact(event):
                 await client(SendReactionRequest(
                     peer=event.chat_id,
                     msg_id=event.id,
-                    reaction=[ReactionEmoji(emoticon=emoji)]
+                    reaction=[ReactionEmoji(emoticon=emoji_char)]
                 ))
             except Exception as err:
                 print("[AUTOREACT ERROR]", err)
@@ -635,7 +695,7 @@ async def read_mentions(event):
         await event.edit("✅ منشن‌های این چت با موفقیت سین شدند.")
     except Exception as error:
         print("[READMENTIONS ERROR]", error)
-        await event.edit(f"❌ خطا در سین کردن منشن‌های این چت:\n{error}")
+        await event.edit(f"❌ خطا:\n{error}")
 
 # ============================================================
 # .USERINFO
@@ -679,10 +739,10 @@ async def user_info(event):
         await event.edit(info_text)
 
     except Exception as error:
-        await event.edit(f"❌ خطا در دریافت اطلاعات کاربر:\n{error}")
+        await event.edit(f"❌ خطا:\n{error}")
 
 # ============================================================
-# .TAG (SMART, NON-REPEATABLE & FULL COUNT WITH PRIORITY)
+# .TAG
 # ============================================================
 
 recent_tagged = {}
@@ -712,7 +772,6 @@ async def tag_users(event):
     me_id = (await client.get_me()).id
 
     try:
-        # جمع‌آوری کاربران از پیام‌های اخیر
         async for msg in client.iter_messages(chat_id, limit=300):
             if not msg.sender_id or msg.sender_id in seen_ids or msg.sender_id == me_id:
                 continue
@@ -742,7 +801,6 @@ async def tag_users(event):
             else:
                 other_pool.append((msg.sender_id, mention))
 
-        # اگر از طریق پیام‌ها به تعداد درخواستی نرسیدیم، از لیست کامل اعضای گروه هم استفاده می‌کنیم
         if len(online_pool) + len(recent_pool) + len(other_pool) < requested_count:
             async for user in client.iter_participants(chat_id):
                 if not user or user.bot or user.deleted or user.id == me_id or user.id in seen_ids:
@@ -771,13 +829,11 @@ async def tag_users(event):
         random.shuffle(recent_pool)
         random.shuffle(other_pool)
 
-        # ترکیب با حفظ کامل اولویت (آنلاین -> اخیراً -> سایر) تا دقیقاً تعداد درخواستی تکمیل شود
         full_pool = online_pool + recent_pool + other_pool
         selected_pairs = full_pool[:requested_count]
         users_to_tag = [item[1] for item in selected_pairs]
 
         if not users_to_tag:
-            # اگر تمام کاربران قبلاً تگ شده بود و لیست تاریخچه پر بود، حافظه موقت را پاک می‌کنیم تا دوباره تگ شوند
             recent_tagged[chat_id].clear()
             await event.edit("🔄 لیست تگ‌های قبلی پاک شد، لطفاً مجدداً دستور `.tag` را ارسال کنید.")
             return
@@ -796,10 +852,10 @@ async def tag_users(event):
 
         await event.delete()
     except Exception as error:
-        await event.edit(f"❌ خطا در تگ هوشمند کاربران:\n{error}")
+        await event.edit(f"❌ خطا:\n{error}")
 
 # ============================================================
-# .KAZINO (MAX-SPEED DYNAMIC MULTI-GAME SILENT AUTOMATION)
+# .KAZINO
 # ============================================================
 
 kazino_active_chats = set()
@@ -807,7 +863,7 @@ kazino_active_chats = set()
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.kazino(?:\s+(.+))?$"))
 async def start_kazino(event):
     match = event.pattern_match
-    emoji = match.group(1).strip() if match.group(1) else "🎰"
+    emoji_dice = match.group(1).strip() if match.group(1) else "🎰"
     
     target_values = {
         "🎰": 64,
@@ -818,7 +874,7 @@ async def start_kazino(event):
         "⚽": 5
     }
     
-    winning_value = target_values.get(emoji, 6)
+    winning_value = target_values.get(emoji_dice, 6)
 
     if not event.is_reply:
         try:
@@ -842,7 +898,7 @@ async def start_kazino(event):
         while chat_id in kazino_active_chats:
             sent_msg = await client.send_message(
                 chat_id, 
-                file=InputMediaDice(emoticon=emoji), 
+                file=InputMediaDice(emoticon=emoji_dice), 
                 reply_to=reply_msg.id
             )
             
@@ -874,12 +930,12 @@ async def stop_kazino(event):
         pass
 
 # ============================================================
-# .STOPALL (STOP ALL FEATURES GLOBALLY)
+# .STOPALL
 # ============================================================
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopall$"))
 async def stop_all_features(event):
-    global fish_task_running, reply_rules, cat_chats, autoreact_rules, kazino_active_chats, automeo_tasks
+    global fish_task_running, reply_rules, cat_chats, autoreact_rules, kazino_active_chats, automeo_tasks, khofash_chats
 
     if fish_task_running:
         fish_task_running.cancel()
@@ -893,15 +949,10 @@ async def stop_all_features(event):
     cat_chats.clear()
     autoreact_rules.clear()
     kazino_active_chats.clear()
+    khofash_chats.clear()
 
     await event.edit(
-        "🛑 **تمام قابلیت‌های تنظیمی بات با موفقیت متوقف و پاکسازی شدند!**\n\n"
-        "• اتوماسیون ماهی متوقف شد.\n"
-        "• ارسال خودکار meo متوقف شد.\n"
-        "• پاسخ‌های خودکار (`.reply`) پاک شدند.\n"
-        "• حالت پیشی (`.cat`) غیرفعال شد.\n"
-        "• ریکشن‌های خودکار (`.autoreact`) متوقف شدند.\n"
-        "• اتوماسیون کازینو (`.kazino`) متوقف شد."
+        "🛑 **تمام قابلیت‌های تنظیمی بات با موفقیت متوقف و پاکسازی شدند!**"
     )
 
 # ============================================================
@@ -913,13 +964,14 @@ async def bot_status_report(event):
     report = ["📊 **گزارش دقیق وضعیت سلف‌بات:**\n"]
 
     if cat_chats:
-        cat_lines = []
-        for cid in cat_chats:
-            info = await get_chat_display_info(cid)
-            cat_lines.append(f"  • {info}")
-        report.append(f"🐱 **حالت .cat (فعال - مخفی):**\n" + "\n".join(cat_lines))
+        report.append("🐱 **حالت .cat:** فعال")
     else:
         report.append("🐱 **حالت .cat:** غیرفعال")
+
+    if khofash_chats:
+        report.append("🦇 **شکارچی خفاش (.khofash):** فعال")
+    else:
+        report.append("🦇 **شکارچی خفاش (.khofash):** غیرفعال")
 
     global fish_task_running
     if fish_task_running and not fish_task_running.done():
@@ -927,51 +979,15 @@ async def bot_status_report(event):
     else:
         report.append("🎣 **اتوماسیون .fish:** غیرفعال")
 
-    if automeo_tasks:
-        meo_lines = []
-        for cid in automeo_tasks.keys():
-            info = await get_chat_display_info(cid)
-            meo_lines.append(f"  • {info}")
-        report.append("🐱 **ارسال خودکار meo (.automeo):**\n" + "\n".join(meo_lines))
-    else:
-        report.append("🐱 **ارسال خودکار meo (.automeo):** غیرفعال")
-
-    if reply_rules:
-        reply_lines = []
-        for cid, rules in reply_rules.items():
-            info = await get_chat_display_info(cid)
-            reply_lines.append(f"  • چت {info} ({len(rules)} قانون)")
-        report.append("🤖 **پاسخ خودکار (.reply):**\n" + "\n".join(reply_lines))
-    else:
-        report.append("🤖 **پاسخ خودکار (.reply):** غیرفعال")
-
-    if autoreact_rules:
-        react_lines = []
-        for cid, rules in autoreact_rules.items():
-            info = await get_chat_display_info(cid)
-            react_lines.append(f"  • چت {info} ({len(rules)} قانون)")
-        report.append("❤️ **ریکشن خودکار (.autoreact):**\n" + "\n".join(react_lines))
-    else:
-        report.append("❤️ **ریکشن خودکار (.autoreact):** غیرفعال")
-
-    if kazino_active_chats:
-        report.append("🎰 **اتوماسیون کازینو (.kazino):** فعال")
-    else:
-        report.append("🎰 **اتوماسیون کازینو (.kazino):** غیرفعال")
-
     await event.edit("\n".join(report), link_preview=False)
 
 # ============================================================
-# .PING
+# .PING & .WHOAMI
 # ============================================================
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.ping$"))
 async def ping(event):
     await event.edit("✅ Userbot is online.")
-
-# ============================================================
-# .WHOAMI
-# ============================================================
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.whoami$"))
 async def whoami(event):
