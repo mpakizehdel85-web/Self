@@ -1,69 +1,236 @@
+import asyncio
+import html
 import os
 import re
+import threading
 import time
-import asyncio
-import random
 from datetime import datetime, timedelta, timezone
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs
+
 from telethon import TelegramClient, events, functions
+from telethon.errors import SessionPasswordNeededError
 from telethon.sessions import StringSession
-from telethon.tl.types import UserStatusOnline, UserStatusRecently, InputMediaDice, ReactionEmoji
-from telethon.tl.functions.messages import SendReactionRequest
-from aiohttp import web
 
 # ============================================================
-# CONFIGURATION
+# SETTINGS
 # ============================================================
-API_ID = int(os.environ.get("TELEGRAM_API_ID", "0"))
-API_HASH = os.environ.get("TELEGRAM_API_HASH", "")
-STRING_SESSION = os.environ.get("TELEGRAM_SESSION", "")
-PORT = int(os.environ.get("PORT", 8080))
+
+API_ID = int(os.environ["TELEGRAM_API_ID"])
+API_HASH = os.environ["TELEGRAM_API_HASH"]
+PHONE = os.environ["TELEGRAM_PHONE"]
+
+TELEGRAM_SESSION = os.environ.get("TELEGRAM_SESSION", "").strip()
+PASSWORD_2FA = os.environ.get("TELEGRAM_2FA_PASSWORD", "")
+PORT = int(os.environ.get("PORT", "8000"))
 START_TIME = time.time()
 
 # ============================================================
-# WEB SERVER (For keep-alive in hosting)
+# TELEGRAM CLIENT
 # ============================================================
-async def handle_ping(request):
-    return web.Response(text="Bot is running!")
+
+if TELEGRAM_SESSION:
+    print("[SESSION] TELEGRAM_SESSION found.")
+    print("[SESSION] Starting with existing StringSession.")
+    SESSION = StringSession(TELEGRAM_SESSION)
+else:
+    print("[SESSION] No TELEGRAM_SESSION found.")
+    print("[SESSION] Starting with a new temporary StringSession.")
+    SESSION = StringSession()
+
+client = TelegramClient(
+    SESSION,
+    API_ID,
+    API_HASH,
+    auto_reconnect=True,
+    connection_retries=None,
+    request_retries=5,
+    retry_delay=5,
+    flood_sleep_threshold=60,
+)
+
+# ============================================================
+# LOGIN WEB PAGE
+# ============================================================
+
+login_state = "starting"
+login_message = "Connecting to Telegram..."
+MAIN_LOOP = None
+
+code_queue = asyncio.Queue()
+password_queue = asyncio.Queue()
+
+def set_login_state(state, message):
+    global login_state, login_message
+    login_state = state
+    login_message = message
+    print("[LOGIN]", message)
+
+def page_template(content):
+    return f"""<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Telegram Userbot</title>
+<style>
+body {{ margin:0; min-height:100vh; display:grid; place-items:center; background:#10131a; color:#fff; font-family:system-ui,sans-serif; }}
+main {{ width:min(92vw,400px); padding:28px; box-sizing:border-box; border-radius:16px; background:#191e28; border:1px solid #303746; }}
+input {{ width:100%; box-sizing:border-box; padding:12px; margin-top:8px; border-radius:9px; border:1px solid #465064; background:#0d1117; color:#fff; font-size:17px; }}
+button {{ width:100%; margin-top:18px; padding:12px; border:0; border-radius:9px; background:#4f8cff; color:white; font-size:16px; font-weight:700; }}
+p {{ color:#b8c0cf; line-height:1.5; }}
+</style>
+</head>
+<body>
+<main>{content}</main>
+</body>
+</html>"""
+
+def login_page():
+    if login_state == "code":
+        return page_template("""
+<h2>Telegram Login</h2>
+<p>کد یک‌بارمصرف تلگرام را وارد کن.</p>
+<form method="post" action="/code" autocomplete="off">
+<label>Login Code</label>
+<input name="code" type="text" inputmode="numeric" autocomplete="one-time-code" required>
+<button type="submit">ورود</button>
+</form>
+""")
+    if login_state == "password":
+        return page_template("""
+<h2>Two-Step Verification</h2>
+<p>رمز دو مرحله‌ای تلگرام را وارد کن.</p>
+<form method="post" action="/password" autocomplete="off">
+<label>2FA Password</label>
+<input name="password" type="password" autocomplete="current-password" required>
+<button type="submit">ادامه</button>
+</form>
+""")
+    if login_state == "authenticated":
+        return page_template("""
+<h2>✅ Telegram Connected</h2>
+<p>Userbot با موفقیت متصل شده است.</p>
+<p>برای دریافت Session در Saved Messages، دستور <b>.session</b> را ارسال کن.</p>
+""")
+    return page_template(f"""
+<h2>Telegram Userbot</h2>
+<p>{html.escape(login_message)}</p>
+<meta http-equiv="refresh" content="2">
+""")
+
+class LoginHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path != "/":
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        body = login_page().encode("utf-8")
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        body = self.rfile.read(length).decode("utf-8")
+        values = parse_qs(body, keep_blank_values=True)
+
+        if self.path == "/code":
+            code = values.get("code", [""])[0].strip()
+            if not code.isdigit():
+                self.send_error(HTTPStatus.BAD_REQUEST, "Invalid code")
+                return
+            if MAIN_LOOP:
+                asyncio.run_coroutine_threadsafe(code_queue.put(code), MAIN_LOOP)
+            self.redirect()
+            return
+
+        if self.path == "/password":
+            password = values.get("password", [""])[0]
+            if not password:
+                self.send_error(HTTPStatus.BAD_REQUEST, "Password required")
+                return
+            if MAIN_LOOP:
+                asyncio.run_coroutine_threadsafe(password_queue.put(password), MAIN_LOOP)
+            self.redirect()
+            return
+
+        self.send_error(HTTPStatus.NOT_FOUND)
+
+    def redirect(self):
+        self.send_response(HTTPStatus.SEE_OTHER)
+        self.send_header("Location", "/")
+        self.end_headers()
+
+    def log_message(self, format, *args):
+        return
 
 def start_web_server():
-    app = web.Application()
-    app.add_routes([web.get('/', handle_ping)])
-    runner = web.AppRunner(app)
-    MAIN_LOOP.create_task(runner.setup())
-    MAIN_LOOP.create_task(web.TCPSite(runner, '0.0.0.0', PORT).start())
-    print(f"Web server started on port {PORT}")
+    server = ThreadingHTTPServer(("0.0.0.0", PORT), LoginHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    print(f"[WEB] Login page running on port {PORT}")
+    return server
 
 # ============================================================
-# TELEGRAM CLIENT SETUP
+# AUTHENTICATION
 # ============================================================
-client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 
 async def authenticate():
     await client.connect()
-    if not await client.is_user_authorized():
-        print("❌ Session is invalid or not authorized.")
+    if await client.is_user_authorized():
+        set_login_state("authenticated", "Existing Telegram session is valid.")
+        print("[LOGIN] Existing Telegram session reused.")
         return
-    print("✅ Successfully authorized.")
+
+    print("[LOGIN] Session is not authorized.")
+    set_login_state("starting", "Requesting a new Telegram login code...")
+    await client.send_code_request(PHONE)
+    set_login_state("code", "Telegram login code requested.")
+    print("[LOGIN] Waiting for login code...")
+    code = await code_queue.get()
+
+    try:
+        await client.sign_in(phone=PHONE, code=code)
+    except SessionPasswordNeededError:
+        print("[LOGIN] Telegram requires 2FA password.")
+        set_login_state("password", "Telegram requires your 2FA password.")
+        password = PASSWORD_2FA if PASSWORD_2FA else await password_queue.get()
+        await client.sign_in(password=password)
+
+    set_login_state("authenticated", "Authentication successful.")
+    print("[LOGIN] Authentication successful.")
+
+# ============================================================
+# HELPER FOR CHAT TITLE/LINK
+# ============================================================
 
 async def get_chat_display_info(chat_id):
     try:
-        entity = await client.get_entity(chat_id)
-        return getattr(entity, 'title', None) or getattr(entity, 'username', None) or str(chat_id)
+        chat = await client.get_entity(chat_id)
+        name = getattr(chat, 'title', None) or getattr(chat, 'first_name', 'Unknown')
+        if getattr(chat, 'username', None):
+            return f"[{name}](https://t.me/{chat.username})"
+        else:
+            return f"{name} (`{chat_id}`)"
     except Exception:
-        return str(chat_id)
+        return f"Chat ID: `{chat_id}`"
 
 # ============================================================
 # COMMAND REGISTRY
 # ============================================================
+
 COMMAND_DESCRIPTIONS = {
     ".session": "دریافت رشته سشن",
     ".set": "زمان‌بندی ارسال پیام",
     ".reply": "تنظیم پاسخ خودکار",
     ".stopreply": "توقف پاسخ خودکار",
-    ".cat": "حالت نجات پیشی (مخفی و خودکار)",
+    ".cat": "حالت نجات پیشی (مخفی)",
     ".stopcat": "توقف نجات پیشی",
-    ".khofash": "حالت شکار خفاش (مخفی و خودکار با ریپلای سریع)",
-    ".stopkhofash": "توقف شکار خفاش",
+    ".khofash": "فعال‌سازی شکارچی خودکار خفاش (مخفی)",
+    ".stopkhofash": "توقف شکارچی خفاش",
     ".delete": "پاکسازی پیام‌ها",
     ".save": "ذخیره پیام در سیو مسیج",
     ".uptime": "آب‌تایم بات",
@@ -76,7 +243,7 @@ COMMAND_DESCRIPTIONS = {
     ".readmentions": "سین کردن منشن‌های این چت",
     ".userinfo": "اطلاعات حساب کاربر با ریپلای",
     ".tag": "تگ کردن هوشمند کاربران",
-    ".kazino": "اتوماسیون کازینو",
+    ".kazino": "اتوماسیون کازینو (مخفی)",
     ".stopkazino": "توقف اتوماسیون کازینو",
     ".stopall": "توقف تمام قابلیت‌های فعال",
     ".status": "گزارش کامل وضعیت بات",
@@ -91,6 +258,10 @@ async def short_help_list(event):
     for cmd, desc in COMMAND_DESCRIPTIONS.items():
         lines.append(f"`{cmd}` : {desc}")
     await event.edit("\n".join(lines))
+
+# ============================================================
+# .SESSION
+# ============================================================
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.session$"))
 async def send_session(event):
@@ -107,6 +278,7 @@ async def send_session(event):
 # ============================================================
 # TIME PARSER & .SET
 # ============================================================
+
 def parse_interval(value):
     value = value.strip().lower()
     match = re.fullmatch(r"(\d+(?:\.\d+)?)(s|m|h)", value)
@@ -149,6 +321,7 @@ async def set_scheduled_messages(event):
 # ============================================================
 # .REPLY
 # ============================================================
+
 reply_rules = {}
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.reply(?:\s|$)?"))
@@ -186,9 +359,11 @@ async def automatic_reply(event):
 async def stop_reply(event):
     reply_rules.pop(event.chat_id, None)
     await event.edit("🛑 ریپلای خودکار متوقف شد.")
+
 # ============================================================
 # .CAT (SILENT MODE)
 # ============================================================
+
 cat_chats = set()
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.cat$"))
@@ -224,18 +399,49 @@ async def cat_new_message(event):
 @client.on(events.MessageEdited())
 async def cat_edited_message(event):
     await check_cat_message(event.message)
+# ============================================================
+# .KHOFASH (BAT GAME AUTO-HUNTER WITH CODE MAPPING & SILENT MODE)
+# ============================================================
 
-# ============================================================
-# .KHOFASH (BAT GAME AUTO-HUNTER - SPAWN DETECTOR)
-# ============================================================
 khofash_chats = set()
 
+# دیکشنری کامل کدهای خفاش (۳۲ مدل بر اساس درخواست شما)
 BAT_CODE_MAPPING = {
-    1: "✨", 2: "🧄", 3: "👀", 4: "👶", 6: "👾", 7: "🌦️", 8: "💨", 9: "⚫️",
-    10: "🕷️", 11: "🧼", 12: "🐥", 13: "💙", 15: "🙍‍♀", 16: "🧽", 17: "🌹",
-    18: "🤖", 19: "💥", 20: "🍋", 21: "🎭", 22: "🏔", 23: "🪞", 24: "🃏",
-    25: "❤️", 26: "🚒", 27: "🌕", 28: "🧛", 29: "🧊", 30: "😇", 31: "😈",
-    33: "🇫🇷", 34: "⭐️", 35: "🌧", 36: "🪙", 37: "⚡️", 38: "🌑"
+    "1": "✨",
+    "2": "🧄",
+    "3": "👀",
+    "4": "👶",
+    "6": "👾",
+    "7": "🌦️",
+    "8": "💨",
+    "9": "⚫️",
+    "10": "🕷️",
+    "11": "🧼",
+    "12": "🐥",
+    "13": "💙",
+    "15": "🙍‍♀",
+    "16": "🧽",
+    "17": "🌹",
+    "18": "🤖",
+    "19": "💥",
+    "20": "🍋",
+    "21": "🎭",
+    "22": "🏔⛰",
+    "23": "🪞",
+    "24": "🃏",
+    "25": "❤️",
+    "26": "🚒",
+    "27": "🌕",
+    "28": "🧛",
+    "29": "🧊",
+    "30": "😇",
+    "31": "😈",
+    "33": "🇫🇷",
+    "34": "⭐️",
+    "35": "🌧",
+    "36": "🪙",
+    "37": "⚡️",
+    "38": "🌑"
 }
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.khofash$"))
@@ -251,32 +457,41 @@ async def stop_khofash(event):
     khofash_chats.discard(event.chat_id)
     await event.edit("🛑 شکارچی خفاش متوقف شد.")
 
-async def process_khofash_spawn(message):
-    text = message.raw_text or ""
+async def process_khofash_message(message):
+    if message.chat_id not in khofash_chats:
+        return
     
-    if message.chat_id in khofash_chats:
-        if "خفاش میویی توی گروه پیدا شد" in text:
-            code_match = re.search(r"کد\s*:\s*(\d+)", text)
-            if code_match:
-                bat_code = int(code_match.group(1))
-                emoji = BAT_CODE_MAPPING.get(bat_code)
-                if emoji:
-                    try:
-                        await message.reply(emoji)
-                    except Exception as err:
-                        print("[KHOFASH ERROR]", err)
+    text = message.raw_text or ""
+    # بررسی پیام خفاش بر اساس متن نمونه شما (خفاش میویی توی گروه پیدا شد / از ... میترسه)
+    if "خفاش" in text and "میترسه" in text:
+        # استخراج شماره کد از داخل متن (مثل کد : 9 یا شماره‌های داخل پرانتز)
+        match = re.search(r"کد\s*:\s*(\d+)", text)
+        if not match:
+            match = re.search(r"\(.*?(\d+).*?\)", text)
+            
+        if match:
+            code_str = match.group(1).strip()
+            emoji = BAT_CODE_MAPPING.get(code_str)
+            
+            if emoji:
+                try:
+                    await asyncio.sleep(0.3) # سرعت بالا برای سبقت گرفتن از بقیه
+                    await message.reply(emoji)
+                except Exception as err:
+                    print("[KHOFASH ERROR]", err)
 
 @client.on(events.NewMessage())
 async def khofash_new_message(event):
-    await process_khofash_spawn(event.message)
+    await process_khofash_message(event.message)
 
 @client.on(events.MessageEdited())
 async def khofash_edited_message(event):
-    await process_khofash_spawn(event.message)
+    await process_khofash_message(event.message)
 
 # ============================================================
-# .DELETE & .SAVE & .UPTIME
+# .DELETE
 # ============================================================
+
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.delete(?:\s+(\d+))?$"))
 async def delete_messages(event):
     match = event.pattern_match
@@ -290,6 +505,10 @@ async def delete_messages(event):
             pass
     print(f"[DELETE] Deleted {deleted} messages.")
 
+# ============================================================
+# .SAVE
+# ============================================================
+
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.save$"))
 async def save_message(event):
     if not event.is_reply:
@@ -298,6 +517,10 @@ async def save_message(event):
     reply_msg = await event.get_reply_message()
     await client.forward_messages("me", reply_msg)
     await event.edit("✅ پیام در Saved Messages ذخیره شد.")
+
+# ============================================================
+# .UPTIME
+# ============================================================
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.uptime$"))
 async def uptime_bot(event):
@@ -309,6 +532,7 @@ async def uptime_bot(event):
 # ============================================================
 # .FISH (DYNAMIC INTERVAL)
 # ============================================================
+
 fish_task_running = None
 
 async def run_fish_workflow(client, chat_id):
@@ -340,11 +564,12 @@ async def run_fish_workflow(client, chat_id):
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.fish(?:\s|$)?"))
 async def start_fish_loop(event):
     global fish_task_running
+    
     cmd_text = event.raw_text.strip()
     match = re.search(r"^\.fish\s+(.+)$", cmd_text, re.IGNORECASE)
     
     if not match:
-        await event.edit("❌ لطفا زمان را وارد کنید.\nمثال:\n`.fish 11m` یا `.fish 30s`")
+        await event.edit("❌ لطفا زمان را وارد کنید.\nمثال:\n`.fish 11m` یا `.fish 30s` یا `.fish 1h`")
         return
         
     interval_str = match.group(1).strip()
@@ -375,9 +600,11 @@ async def stop_fish_loop(event):
         await event.edit("🛑 اتوماسیون ماهی متوقف شد.")
     else:
         await event.edit("❌ هیچ اتوماسیونی فعالی وجود ندارد.")
+
 # ============================================================
-# .AUTOMEO
+# .AUTOMEO (AUTO MEO EVERY 5 MINUTES)
 # ============================================================
+
 automeo_tasks = {}
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.automeo$"))
@@ -388,6 +615,7 @@ async def start_automeo(event):
         return
 
     await event.edit("🐱 **ارسال خودکار meo هر ۵ دقیقه فعال شد.**")
+
     async def meo_loop():
         while True:
             try:
@@ -410,8 +638,9 @@ async def stop_automeo(event):
         await event.edit("❌ هیچ ارسال خودکاری در این چت فعال نیست.")
 
 # ============================================================
-# .AUTOREACT & .READMENTIONS & .USERINFO
+# AUTO-REACTION FEATURE
 # ============================================================
+
 autoreact_rules = {}
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.autoreact(?:\s|$)"))
@@ -453,6 +682,7 @@ async def handle_autoreact(event):
     chat_id = event.chat_id
     if chat_id not in autoreact_rules:
         return
+    
     rules = autoreact_rules[chat_id]
     sender = await event.get_sender()
     sender_id_str = str(sender.id) if sender else ""
@@ -462,6 +692,7 @@ async def handle_autoreact(event):
     for target, emoji in rules.items():
         t_clean = target.casefold()
         matched = False
+
         if t_clean.startswith("@") or t_clean.isdigit():
             if t_clean == sender_id_str or t_clean == sender_username:
                 matched = True
@@ -471,6 +702,8 @@ async def handle_autoreact(event):
 
         if matched:
             try:
+                from telethon.tl.functions.messages import SendReactionRequest
+                from telethon.tl.types import ReactionEmoji
                 await client(SendReactionRequest(
                     peer=event.chat_id,
                     msg_id=event.id,
@@ -480,6 +713,10 @@ async def handle_autoreact(event):
                 print("[AUTOREACT ERROR]", err)
             break
 
+# ============================================================
+# .READMENTIONS
+# ============================================================
+
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.readmentions$"))
 async def read_mentions(event):
     await event.edit("⏳ در حال سین کردن منشن‌های این چت...")
@@ -487,7 +724,12 @@ async def read_mentions(event):
         await client(functions.messages.ReadMentionsRequest(peer=event.chat_id))
         await event.edit("✅ منشن‌های این چت با موفقیت سین شدند.")
     except Exception as error:
+        print("[READMENTIONS ERROR]", error)
         await event.edit(f"❌ خطا:\n{error}")
+
+# ============================================================
+# .USERINFO
+# ============================================================
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.userinfo(?:\s|$)?"))
 async def user_info(event):
@@ -497,7 +739,8 @@ async def user_info(event):
 
     try:
         if match:
-            target_user = await client.get_entity(match.group(1).strip())
+            query = match.group(1).strip()
+            target_user = await client.get_entity(query)
         elif event.is_reply:
             reply_msg = await event.get_reply_message()
             if reply_msg:
@@ -506,37 +749,55 @@ async def user_info(event):
             target_user = await event.get_sender()
 
         if not target_user:
-            await event.edit("❌ کاربر یافت نشد.")
+            await event.edit("❌ کاربر مورد نظر یافت نشد.")
             return
 
         name = f"{target_user.first_name or ''} {target_user.last_name or ''}".strip()
         username = f"@{target_user.username}" if getattr(target_user, 'username', None) else "ندارد"
-        info_text = (f"👤 **مشخصات حساب:**\n\n• نام: `{name}`\n• آیدی: `{target_user.id}`\n"
-                     f"• یوزرنیم: {username}\n• ربات؟: {'بله' if target_user.bot else 'خیر'}\n"
-                     f"• پرمیوم؟: {'بله' if getattr(target_user, 'premium', False) else 'خیر'}")
+        user_id = target_user.id
+        is_bot = "بله" if getattr(target_user, 'bot', False) else "خیر"
+        is_premium = "بله" if getattr(target_user, 'premium', False) else "خیر"
+
+        info_text = (
+            f"👤 **مشخصات حساب کاربری:**\n\n"
+            f"• نام: `{name}`\n"
+            f"• آیدی عددی: `{user_id}`\n"
+            f"• یوزرنیم: {username}\n"
+            f"• ربات است؟: {is_bot}\n"
+            f"• پرمیوم است؟: {is_premium}"
+        )
         await event.edit(info_text)
+
     except Exception as error:
         await event.edit(f"❌ خطا:\n{error}")
 
 # ============================================================
-# .TAG 
+# .TAG (SMART, NON-REPEATABLE & FULL COUNT WITH PRIORITY)
 # ============================================================
+
 recent_tagged = {}
+
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.tag(?:\s+(\d+))?$"))
 async def tag_users(event):
     if not event.is_group and not event.is_channel:
-        await event.edit("❌ فقط در گروه‌ها.")
+        await event.edit("❌ این دستور فقط در گروه‌ها یا سوپرگروه‌ها قابل استفاده است.")
         return
 
     match = event.pattern_match
-    requested_count = min(int(match.group(1)) if match.group(1) else 10, 100)
-    await event.edit(f"⏳ در حال استخراج...")
+    requested_count = int(match.group(1)) if match.group(1) else 10
+    if requested_count > 100:
+        requested_count = 100
+
+    await event.edit(f"⏳ در حال استخراج و مرتب‌سازی هوشمند کاربران...")
 
     chat_id = event.chat_id
     if chat_id not in recent_tagged:
         recent_tagged[chat_id] = []
 
-    online_pool, recent_pool, other_pool = [], [], []
+    online_pool = []
+    recent_pool = []
+    other_pool = []
+    
     seen_ids = set()
     me_id = (await client.get_me()).id
 
@@ -544,29 +805,56 @@ async def tag_users(event):
         async for msg in client.iter_messages(chat_id, limit=300):
             if not msg.sender_id or msg.sender_id in seen_ids or msg.sender_id == me_id:
                 continue
-            user = msg.sender
-            if not user or user.bot or user.deleted: continue
-            seen_ids.add(msg.sender_id)
-            if msg.sender_id in recent_tagged[chat_id]: continue
-
-            mention = f"@{user.username}" if getattr(user, 'username', None) else f"[{getattr(user, 'first_name', 'دوست')}](tg://user?id={user.id})"
-            status = getattr(user, 'status', None)
             
-            if isinstance(status, UserStatusOnline): online_pool.append((msg.sender_id, mention))
-            elif isinstance(status, UserStatusRecently): recent_pool.append((msg.sender_id, mention))
-            else: other_pool.append((msg.sender_id, mention))
+            user = msg.sender
+            if not user or user.bot or user.deleted:
+                continue
+                
+            seen_ids.add(msg.sender_id)
+
+            if msg.sender_id in recent_tagged[chat_id]:
+                continue
+
+            name = getattr(user, 'first_name', None) or "دوست"
+            if getattr(user, 'username', None):
+                mention = f"@{user.username}"
+            else:
+                mention = f"[{name}](tg://user?id={user.id})"
+
+            status = getattr(user, 'status', None)
+            from telethon.tl.types import UserStatusOnline, UserStatusRecently
+            
+            if isinstance(status, UserStatusOnline):
+                online_pool.append((msg.sender_id, mention))
+            elif isinstance(status, UserStatusRecently):
+                recent_pool.append((msg.sender_id, mention))
+            else:
+                other_pool.append((msg.sender_id, mention))
 
         if len(online_pool) + len(recent_pool) + len(other_pool) < requested_count:
             async for user in client.iter_participants(chat_id):
-                if not user or user.bot or user.deleted or user.id == me_id or user.id in seen_ids or user.id in recent_tagged[chat_id]:
+                if not user or user.bot or user.deleted or user.id == me_id or user.id in seen_ids:
                     continue
+                if user.id in recent_tagged[chat_id]:
+                    continue
+                
                 seen_ids.add(user.id)
-                mention = f"@{user.username}" if getattr(user, 'username', None) else f"[{getattr(user, 'first_name', 'دوست')}](tg://user?id={user.id})"
+                name = getattr(user, 'first_name', None) or "دوست"
+                if getattr(user, 'username', None):
+                    mention = f"@{user.username}"
+                else:
+                    mention = f"[{name}](tg://user?id={user.id})"
+                
                 status = getattr(user, 'status', None)
-                if isinstance(status, UserStatusOnline): online_pool.append((user.id, mention))
-                elif isinstance(status, UserStatusRecently): recent_pool.append((user.id, mention))
-                else: other_pool.append((user.id, mention))
+                from telethon.tl.types import UserStatusOnline, UserStatusRecently
+                if isinstance(status, UserStatusOnline):
+                    online_pool.append((user.id, mention))
+                elif isinstance(status, UserStatusRecently):
+                    recent_pool.append((user.id, mention))
+                else:
+                    other_pool.append((user.id, mention))
 
+        import random
         random.shuffle(online_pool)
         random.shuffle(recent_pool)
         random.shuffle(other_pool)
@@ -577,102 +865,246 @@ async def tag_users(event):
 
         if not users_to_tag:
             recent_tagged[chat_id].clear()
-            await event.edit("🔄 لیست قبلی پاک شد، مجدداً ارسال کنید.")
+            await event.edit("🔄 لیست تگ‌های قبلی پاک شد، لطفاً مجدداً دستور `.tag` را ارسال کنید.")
             return
 
-        for uid, _ in selected_pairs: recent_tagged[chat_id].append(uid)
-        if len(recent_tagged[chat_id]) > 150: recent_tagged[chat_id] = recent_tagged[chat_id][-150:]
+        for uid, _ in selected_pairs:
+            recent_tagged[chat_id].append(uid)
+        if len(recent_tagged[chat_id]) > 150:
+            recent_tagged[chat_id] = recent_tagged[chat_id][-150:]
 
-        for i in range(0, len(users_to_tag), 5):
-            await client.send_message(chat_id, "👥 **دوستان:**\n" + " ".join(users_to_tag[i:i + 5]))
+        chunk_size = 5
+        for i in range(0, len(users_to_tag), chunk_size):
+            chunk = users_to_tag[i:i + chunk_size]
+            text = "👥 **دوستان عزیز:**\n" + " ".join(chunk)
+            await client.send_message(chat_id, text)
             await asyncio.sleep(1.5)
+
         await event.delete()
     except Exception as error:
         await event.edit(f"❌ خطا:\n{error}")
 
 # ============================================================
-# .KAZINO & .STOPALL & .STATUS & .PING
+# .KAZINO
 # ============================================================
+
 kazino_active_chats = set()
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.kazino(?:\s+(.+))?$"))
 async def start_kazino(event):
-    emoji = event.pattern_match.group(1).strip() if event.pattern_match.group(1) else "🎰"
-    winning_value = {"🎰": 64, "🎲": 6, "🎯": 6, "🎳": 6, "🏀": 5, "⚽": 5}.get(emoji, 6)
+    match = event.pattern_match
+    emoji = match.group(1).strip() if match.group(1) else "🎰"
+    
+    target_values = {
+        "🎰": 64,
+        "🎲": 6,
+        "🎯": 6,
+        "🎳": 6,
+        "🏀": 5,
+        "⚽": 5
+    }
+    
+    winning_value = target_values.get(emoji, 6)
 
     if not event.is_reply:
-        try: await event.delete()
-        except: pass
+        try:
+            await event.delete()
+        except Exception:
+            pass
         return
 
     reply_msg = await event.get_reply_message()
     chat_id = event.chat_id
     kazino_active_chats.add(chat_id)
-    try: await event.delete()
-    except: pass
+    
+    try:
+        await event.delete()
+    except Exception:
+        pass
 
     try:
+        from telethon.tl.types import InputMediaDice
+        
         while chat_id in kazino_active_chats:
-            sent_msg = await client.send_message(chat_id, file=InputMediaDice(emoticon=emoji), reply_to=reply_msg.id)
-            dice_value = sent_msg.media.value if sent_msg.media and hasattr(sent_msg.media, 'value') else None
+            sent_msg = await client.send_message(
+                chat_id, 
+                file=InputMediaDice(emoticon=emoji), 
+                reply_to=reply_msg.id
+            )
+            
+            dice_value = None
+            if sent_msg.media and hasattr(sent_msg.media, 'value'):
+                dice_value = sent_msg.media.value
+                
             if dice_value == winning_value:
                 kazino_active_chats.discard(chat_id)
                 break
-            try: await sent_msg.delete()
-            except: pass
+            
+            try:
+                await sent_msg.delete()
+            except Exception:
+                pass
+                
             await asyncio.sleep(0.02)
+                
     except Exception as error:
         kazino_active_chats.discard(chat_id)
+        print("[KAZINO ERROR]", error)
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopkazino$"))
 async def stop_kazino(event):
     kazino_active_chats.discard(event.chat_id)
-    try: await event.delete()
-    except: pass
+    try:
+        await event.delete()
+    except Exception:
+        pass
+
+# ============================================================
+# .STOPALL
+# ============================================================
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopall$"))
 async def stop_all_features(event):
-    global fish_task_running
-    if fish_task_running: fish_task_running.cancel(); fish_task_running = None
-    for task in automeo_tasks.values(): task.cancel()
-    automeo_tasks.clear(); reply_rules.clear(); cat_chats.clear(); autoreact_rules.clear(); kazino_active_chats.clear(); khofash_chats.clear()
-    await event.edit("🛑 **تمام قابلیت‌های تنظیمی متوقف شدند!**")
+    global fish_task_running, reply_rules, cat_chats, autoreact_rules, kazino_active_chats, automeo_tasks, khofash_chats
+
+    if fish_task_running:
+        fish_task_running.cancel()
+        fish_task_running = None
+
+    for task in automeo_tasks.values():
+        task.cancel()
+    automeo_tasks.clear()
+
+    reply_rules.clear()
+    cat_chats.clear()
+    autoreact_rules.clear()
+    kazino_active_chats.clear()
+    khofash_chats.clear()
+
+    await event.edit(
+        "🛑 **تمام قابلیت‌های تنظیمی بات با موفقیت متوقف و پاکسازی شدند!**\n\n"
+        "• اتوماسیون ماهی متوقف شد.\n"
+        "• ارسال خودکار meo متوقف شد.\n"
+        "• پاسخ‌های خودکار پاک شدند.\n"
+        "• حالت پیشی غیرفعال شد.\n"
+        "• شکارچی خفاش متوقف شد.\n"
+        "• ریکشن‌های خودکار متوقف شدند.\n"
+        "• اتوماسیون کازینو متوقف شد."
+    )
+
+# ============================================================
+# .STATUS
+# ============================================================
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.status$"))
 async def bot_status_report(event):
-    report = ["📊 **گزارش وضعیت سلف‌بات:**\n"]
-    report.append(f"🐱 **حالت .cat:** {'فعال' if cat_chats else 'غیرفعال'}")
-    report.append(f"🦇 **شکارچی خفاش:** {'فعال' if khofash_chats else 'غیرفعال'}")
-    report.append(f"🎣 **اتوماسیون .fish:** {'فعال' if fish_task_running else 'غیرفعال'}")
-    report.append(f"🐱 **ارسال .automeo:** {'فعال' if automeo_tasks else 'غیرفعال'}")
-    report.append(f"🤖 **پاسخ .reply:** {'فعال' if reply_rules else 'غیرفعال'}")
-    report.append(f"❤️ **ریکشن .autoreact:** {'فعال' if autoreact_rules else 'غیرفعال'}")
-    report.append(f"🎰 **اتوماسیون .kazino:** {'فعال' if kazino_active_chats else 'غیرفعال'}")
-    await event.edit("\n".join(report))
+    report = ["📊 **گزارش دقیق وضعیت سلف‌بات:**\n"]
+
+    if cat_chats:
+        cat_lines = []
+        for cid in cat_chats:
+            info = await get_chat_display_info(cid)
+            cat_lines.append(f"  • {info}")
+        report.append(f"🐱 **حالت .cat (فعال - مخفی):**\n" + "\n".join(cat_lines))
+    else:
+        report.append("🐱 **حالت .cat:** غیرفعال")
+
+    if khofash_chats:
+        kh_lines = []
+        for cid in khofash_chats:
+            info = await get_chat_display_info(cid)
+            kh_lines.append(f"  • {info}")
+        report.append("🦇 **شکارچی خفاش (.khofash):**\n" + "\n".join(kh_lines))
+    else:
+        report.append("🦇 **شکارچی خفاش (.khofash):** غیرفعال")
+
+    global fish_task_running
+    if fish_task_running and not fish_task_running.done():
+        report.append("🎣 **اتوماسیون .fish:** فعال")
+    else:
+        report.append("🎣 **اتوماسیون .fish:** غیرفعال")
+
+    if automeo_tasks:
+        meo_lines = []
+        for cid in automeo_tasks.keys():
+            info = await get_chat_display_info(cid)
+            meo_lines.append(f"  • {info}")
+        report.append("🐱 **ارسال خودکار meo (.automeo):**\n" + "\n".join(meo_lines))
+    else:
+        report.append("🐱 **ارسال خودکار meo (.automeo):** غیرفعال")
+
+    if reply_rules:
+        reply_lines = []
+        for cid, rules in reply_rules.items():
+            info = await get_chat_display_info(cid)
+            reply_lines.append(f"  • چت {info} ({len(rules)} قانون)")
+        report.append("🤖 **پاسخ خودکار (.reply):**\n" + "\n".join(reply_lines))
+    else:
+        report.append("🤖 **پاسخ خودکار (.reply):** غیرفعال")
+
+    if autoreact_rules:
+        react_lines = []
+        for cid, rules in autoreact_rules.items():
+            info = await get_chat_display_info(cid)
+            react_lines.append(f"  • چت {info} ({len(rules)} قانون)")
+        report.append("❤️ **ریکشن خودکار (.autoreact):**\n" + "\n".join(react_lines))
+    else:
+        report.append("❤️ **ریکشن خودکار (.autoreact):** غیرفعال")
+
+    if kazino_active_chats:
+        report.append("🎰 **اتوماسیون کازینو (.kazino):** فعال")
+    else:
+        report.append("🎰 **اتوماسیون کازینو (.kazino):** غیرفعال")
+
+    await event.edit("\n".join(report), link_preview=False)
+
+# ============================================================
+# .PING & .WHOAMI
+# ============================================================
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.ping$"))
-async def ping(event): await event.edit("✅ Userbot is online.")
+async def ping(event):
+    await event.edit("✅ Userbot is online.")
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.whoami$"))
 async def whoami(event):
     me = await client.get_me()
-    await event.edit(f"Name: {me.first_name or ''}\nUsername: @{me.username or 'none'}\nID: {me.id}")
+    username = f"@{me.username}" if me.username else "No username"
+    await event.edit(f"Name: {me.first_name or ''}\nUsername: {username}\nID: {me.id}")
 
 # ============================================================
 # MAIN
 # ============================================================
+
 async def main():
     global MAIN_LOOP
     MAIN_LOOP = asyncio.get_running_loop()
     start_web_server()
-    print("======================================\nTelegram Userbot starting...\n======================================")
+
+    print("======================================")
+    print("Telegram Userbot starting...")
+    print("======================================")
+
     await authenticate()
+
     me = await client.get_me()
-    print(f"✅ USERBOT CONNECTED\nName: {me.first_name or ''}\n======================================")
+    print("======================================")
+    print("✅ USERBOT CONNECTED")
+    print(f"Name: {me.first_name or ''}")
+    print(f"Username: @{me.username or 'none'}")
+    print("======================================")
+
     await client.run_until_disconnected()
+
+# ============================================================
+# START
+# ============================================================
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         print("Userbot stopped.")
+    except Exception as error:
+        print("USERBOT ERROR:", error)
+        raise
