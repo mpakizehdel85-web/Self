@@ -400,13 +400,13 @@ async def cat_new_message(event):
 async def cat_edited_message(event):
     await check_cat_message(event.message)
 # ============================================================
-# .KHOFASH (BAT GAME AUTO-HUNTER - FIXED REPLY WITH CORRECT EMOJI)
+# .KHOFASH (BAT GAME AUTO-HUNTER - CORRECT PREMIUM ID TO EMOJI REPLY)
 # ============================================================
 
 khofash_chats = set()
 
-# مپینگ Document ID ایموجی‌های پرمیوم خفاش به ایموجی متناظر برای ارسال در پاسخ
-BAT_EMOJI_REPLY_MAPPING = {
+# مپینگ Document ID ایموجی‌های پرمیوم به ایموجیِ پاسخی که باید ارسال شود
+BAT_ID_TO_REPLY_EMOJI = {
     5828139598399677018: "✨",
     5827686629673803792: "🧄",
     5828137768743610848: "👀",
@@ -465,25 +465,25 @@ async def process_khofash_message(message):
         return
     
     text = message.raw_text or ""
-    if "خفاش" in text:
+    if "خفاش" in text or message.entities:
         matched_doc_id = None
         
-        # بررسی موجودیت ایموجی پرمیوم (Custom Emoji) در متن یا entities پیام
+        # استخراج کد (document_id) ایموجی پرمیوم خفاش از پیام
         if message.entities:
             from telethon.tl.types import MessageEntityCustomEmoji
             for entity in message.entities:
                 if isinstance(entity, MessageEntityCustomEmoji):
-                    if entity.document_id in BAT_EMOJI_REPLY_MAPPING:
+                    if entity.document_id in BAT_ID_TO_REPLY_EMOJI:
                         matched_doc_id = entity.document_id
                         break
         
         if matched_doc_id:
-            reply_emoji = BAT_EMOJI_REPLY_MAPPING[matched_doc_id]
+            reply_emoji = BAT_ID_TO_REPLY_EMOJI[matched_doc_id]
             try:
-                # ریپلای روی پیام خفاش و ارسال ایموجی صحیح
+                # ریپلای زدن روی پیام خفاش و فرستادن ایموجی هدف
                 await message.reply(reply_emoji)
                 
-                # ارسال گزارش به Saved Messages
+                # گزارش به Saved Messages
                 chat = await message.get_chat()
                 if chat and getattr(chat, 'username', None):
                     message_link = f"https://t.me/{chat.username}/{message.id}"
@@ -492,7 +492,7 @@ async def process_khofash_message(message):
                     clean_id = c_id[4:] if c_id.startswith("-100") else (c_id[1:] if c_id.startswith("-") else c_id)
                     message_link = f"https://t.me/c/{clean_id}/{message.id}"
                 
-                report_text = f"🦇 خفاش با ایموجی '{reply_emoji}' شکار شد:\n{message_link}"
+                report_text = f"🦇 خفاش با ایموجی '{reply_emoji}' (شناسه پرمیوم: `{matched_doc_id}`) شکار شد:\n{message_link}"
                 await client.send_message("me", report_text, link_preview=False)
                 
             except Exception as err:
@@ -506,19 +506,6 @@ async def khofash_new_message(event):
 async def khofash_edited_message(event):
     await process_khofash_message(event.message)
 
-
-# ============================================================
-# .SAVE
-# ============================================================
-
-@client.on(events.NewMessage(outgoing=True, pattern=r"^\.save$"))
-async def save_message(event):
-    if not event.is_reply:
-        await event.edit("❌ لطفا روی پیامی که می‌خواهید ذخیره کنید ریپلای بزنید.")
-        return
-    reply_msg = await event.get_reply_message()
-    await client.forward_messages("me", reply_msg)
-    await event.edit("✅ پیام در Saved Messages ذخیره شد.")
 
 # ============================================================
 # .UPTIME
