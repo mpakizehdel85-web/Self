@@ -1,10 +1,11 @@
 import asyncio
 import html
+import io
+import json
 import os
 import re
 import threading
 import time
-import json
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -29,25 +30,15 @@ PORT = int(os.environ.get("PORT", "8000"))
 START_TIME = time.time()
 
 CACHE_FILE = "bat_cache.json"
-
-if os.path.exists(CACHE_FILE):
-    try:
-        with open(CACHE_FILE, "r", encoding="utf-8") as f:
-            bat_cache = json.load(f)
-    except Exception:
-        bat_cache = {}
-else:
-    bat_cache = {}
+bat_cache = {}
 
 # ============================================================
 # TELEGRAM CLIENT
 # ============================================================
 
 if TELEGRAM_SESSION:
-    print("[SESSION] TELEGRAM_SESSION found.")
     SESSION = StringSession(TELEGRAM_SESSION)
 else:
-    print("[SESSION] No TELEGRAM_SESSION found.")
     SESSION = StringSession()
 
 client = TelegramClient(
@@ -76,7 +67,6 @@ def set_login_state(state, message):
     global login_state, login_message
     login_state = state
     login_message = message
-    print("[LOGIN]", message)
 
 def page_template(content):
     return f"""<!doctype html>
@@ -175,47 +165,65 @@ class LoginHandler(BaseHTTPRequestHandler):
 def start_web_server():
     server = ThreadingHTTPServer(("0.0.0.0", PORT), LoginHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    print(f"[WEB] Login page running on port {PORT}")
     return server
-
-# ============================================================
-# AUTHENTICATION
-# ============================================================
 
 async def authenticate():
     await client.connect()
     if await client.is_user_authorized():
-        set_login_state("authenticated", "Existing Telegram session is valid.")
+        set_login_state("authenticated", "Existing session is valid.")
         return
 
-    set_login_state("starting", "Requesting a new Telegram login code...")
+    set_login_state("starting", "Requesting new login code...")
     await client.send_code_request(PHONE)
-    set_login_state("code", "Telegram login code requested.")
+    set_login_state("code", "Code requested.")
     code = await code_queue.get()
 
     try:
         await client.sign_in(phone=PHONE, code=code)
     except SessionPasswordNeededError:
-        set_login_state("password", "Telegram requires your 2FA password.")
+        set_login_state("password", "2FA required.")
         password = PASSWORD_2FA if PASSWORD_2FA else await password_queue.get()
         await client.sign_in(password=password)
 
     set_login_state("authenticated", "Authentication successful.")
 
 # ============================================================
-# HELPERS & COMMAND REGISTRY
+# CLOUD CACHE MANAGEMENT (PERSISTENT BACKUP)
 # ============================================================
 
-async def get_chat_display_info(chat_id):
+async def load_cache_from_telegram():
+    global bat_cache
     try:
-        chat = await client.get_entity(chat_id)
-        name = getattr(chat, 'title', None) or getattr(chat, 'first_name', 'Unknown')
-        if getattr(chat, 'username', None):
-            return f"[{name}](https://t.me/{chat.username})"
-        else:
-            return f"{name} (`{chat_id}`)"
-    except Exception:
-        return f"Chat ID: `{chat_id}`"
+        async for message in client.iter_messages("me", search="BAT_CACHE_BACKUP", limit=5):
+            if message.file:
+                downloaded = await message.download_media(bytes)
+                if downloaded:
+                    bat_cache = json.loads(downloaded.decode("utf-8"))
+                    print(f"[CACHE] Loaded {len(bat_cache)} items from Saved Messages.")
+                    break
+    except Exception as err:
+        print("[CACHE LOAD ERROR]", err)
+
+async def save_and_backup_cache():
+    try:
+        with open(CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(bat_cache, f, ensure_ascii=False)
+        
+        json_data = json.dumps(bat_cache, ensure_ascii=False, indent=2).encode("utf-8")
+        file_obj = io.BytesIO(json_data)
+        file_obj.name = "bat_cache.json"
+        
+        await client.send_message(
+            "me",
+            "📦 **نسخه پشتیبان کش خفاش‌ها (BAT_CACHE_BACKUP)**",
+            file=file_obj
+        )
+    except Exception as err:
+        print("[CACHE BACKUP ERROR]", err)
+
+# ============================================================
+# COMMAND DESCRIPTIONS & BASICS
+# ============================================================
 
 COMMAND_DESCRIPTIONS = {
     ".session": "دریافت رشته سشن",
@@ -224,8 +232,9 @@ COMMAND_DESCRIPTIONS = {
     ".stopreply": "توقف پاسخ خودکار",
     ".cat": "حالت نجات پیشی (مخفی)",
     ".stopcat": "توقف نجات پیشی",
-    ".khofash": "شکارچی خودکار خفاش (بهینه‌شده)",
+    ".khofash": "شکارچی خودکار خفاش (هوشمند)",
     ".stopkhofash": "توقف شکارچی خفاش",
+    ".showcache": "مشاهده کش‌های یادگرفته‌شده",
     ".delete": "پاکسازی پیام‌ها",
     ".save": "ذخیره پیام در سیو مسیج",
     ".uptime": "آب‌تایم بات",
@@ -259,7 +268,7 @@ async def send_session(event):
     try:
         session_string = client.session.save()
         if not session_string:
-            await event.edit("❌ Session هنوز آماده نیست.")
+            await event.edit("❌ Session آماده نیست.")
             return
         await client.send_message("me", session_string)
         await event.edit("✅ TELEGRAM_SESSION در Saved Messages ارسال شد.")
@@ -399,7 +408,7 @@ async def start_fish_loop(event):
     cmd_text = event.raw_text.strip()
     match = re.search(r"^\.fish\s+(.+)$", cmd_text, re.IGNORECASE)
     if not match:
-        await event.edit("❌ فرمت زمان اشتباه است.\nمثال: `.fish 11m`")
+        await event.edit("❌ فرمت زمان اشتباه.\nمثال: `.fish 11m`")
         return
     interval_str = match.group(1).strip()
     interval_seconds = parse_interval(interval_str)
@@ -457,6 +466,14 @@ async def stop_khofash(event):
     khofash_chats.discard(event.chat_id)
     await event.edit("🛑 شکارچی خفاش متوقف شد.")
 
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.showcache$"))
+async def show_cache_status(event):
+    count = len(bat_cache)
+    items_str = "\n".join([f"ID: `{k}` ➔ کد: **{v}**" for k, v in bat_cache.items()])
+    if not items_str:
+        items_str = "هنوز هیچ خفاشی یاد نگرفته!"
+    await event.edit(f"📊 **تعداد کل یادگرفته‌ها:** {count}\n\n{items_str}")
+
 @client.on(events.NewMessage())
 async def instant_khofash_hunter(event):
     if event.chat_id not in khofash_chats:
@@ -496,11 +513,7 @@ async def instant_khofash_hunter(event):
                 data = pending_learning.pop(event.sender_id)
                 code = match.group(1)
                 bat_cache[data["emoji_id"]] = code
-                try:
-                    with open(CACHE_FILE, "w", encoding="utf-8") as f:
-                        json.dump(bat_cache, f, ensure_ascii=False)
-                except Exception as err:
-                    print("[CACHE SAVE ERROR]", err)
+                await save_and_backup_cache()
 
 # ============================================================
 # .DELETE & .SAVE
@@ -638,22 +651,7 @@ async def user_info(event):
         name = f"{target.first_name or ''} {target.last_name or ''}".strip()
         await event.edit(f"👤 **مشخصات:**\n• نام: `{name}`\n• آیدی: `{target.id}`\n• یوزرنیم: @{target.username or 'ندارد'}")
     except Exception as error:
-    
         await event.edit(f"❌ خطا: {error}")
-@client.on(events.NewMessage(outgoing=True, pattern=r"^\.showcache$"))
-async def show_cache_status(event):
-    count = len(bat_cache)
-    items_str = "\n".join([f"ID: `{k}` ➔ کد: **{v}**" for k, v in bat_cache.items()])
-    if not items_str:
-        items_str = "هنوز هیچ خفاشی یاد نگرفته!"
-    await event.edit(f"📊 **تعداد کل یادگرفته‌ها:** {count}\n\n{items_str}")
-
-async def main():
-    global MAIN_LOOP
-    MAIN_LOOP = asyncio.get_running_loop()
-    start_web_server()
-    print("Telegram Userbot starting...")
-    # ...
 
 # ============================================================
 # .TAG, .KAZINO, .STOPALL, .STATUS, .PING, .WHOAMI & MAIN
@@ -772,6 +770,10 @@ async def main():
     start_web_server()
     print("Telegram Userbot starting...")
     await authenticate()
+    
+    # بارگذاری کش از Saved Messages هنگام بالا آمدن بات
+    await load_cache_from_telegram()
+    
     me = await client.get_me()
     print(f"✅ USERBOT CONNECTED: {me.first_name}")
     await client.run_until_disconnected()
