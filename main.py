@@ -317,17 +317,29 @@ async def set_scheduled_messages(event):
         await event.edit(f"✅ {scheduled} پیام زمان‌بندی شد.")
     except Exception as error:
         await event.edit(f"❌ خطا: {error}")# ============================================================
-# .SCANBAT (SCANNING ENTIRE CHAT HISTORY WITHOUT LIMIT)
 # ============================================================
+# .SCANBAT (SMART SCANNING WITH 2000 LIMIT & ALREADY FOUND FILTER)
+# ============================================================
+
+# کدهایی که تا الان پیدا کرده‌ایم (برای رد کردن و جلوگیری از پردازش تکراری)
+ALREADY_FOUND_CODES = {
+    "1", "2", "4", "5", "6", "7", "8", "9", "10", "11", 
+    "12", "13", "16", "17", "18", "19", "21", "22", "24", 
+    "25", "26", "27", "29", "30", "31", "32", "33", "37", "38"
+}
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.scanbat$"))
 async def scan_bat_emojis(event):
-    await event.edit("🔄 در حال اسکن کل تاریخچه چت (بدون محدودیت) برای پیدا کردن کدهای خفاش...")
+    await event.edit("🔄 اسکن هوشمند با لیمیت ۲۰۰۰ پیام و فیلتر کدهای تکراری شروع شد...")
     
     found_mapping = {}
-    # حذف محدودیت limit تا تمام پیام‌های چت بررسی شوند
-    async for message in client.iter_messages(event.chat_id):
+    scanned_count = 0
+    
+    # محدود کردن اسکن به ۲۰۰۰ پیام آخر برای سرعت بالا
+    async for message in client.iter_messages(event.chat_id, limit=2000):
+        scanned_count += 1
         text = message.raw_text or ""
+        
         if "خفاش" in text and "کد" in text:
             match = re.search(r"کد\s*:\s*(\d+)", text)
             if not match:
@@ -335,10 +347,11 @@ async def scan_bat_emojis(event):
             
             if match:
                 code_str = match.group(1).strip()
-                if code_str not in found_mapping:
+                
+                # اگر این کد جزو کدهای از پیش‌گفته نبود و جدید بود، بررسی کن
+                if code_str not in ALREADY_FOUND_CODES and code_str not in found_mapping:
                     bot_sender_id = message.sender_id
                     try:
-                        # بررسی ۶ پیام قبلی در آن چت برای پیدا کردن پیامِ همان بات که ایموجی پرمیوم دارد
                         async for prev_msg in client.iter_messages(event.chat_id, max_id=message.id, limit=6):
                             if prev_msg.sender_id == bot_sender_id and prev_msg.entities:
                                 found_emoji = False
@@ -355,17 +368,16 @@ async def scan_bat_emojis(event):
                         pass
 
     if found_mapping:
-        result_lines = ["🦇 **مپینگ کامل کدهای خفاش:**\n"]
+        result_lines = ["🦇 **کدهای جدیدِ کشف‌شده:**\n"]
         sorted_mapping = sorted(found_mapping.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 0)
         
         for code, doc_id in sorted_mapping:
             result_lines.append(f"'{code}': '{doc_id}',")
         
         await client.send_message("me", "\n".join(result_lines))
-        await event.edit("✅ اسکن کامل تاریخچه چت به پایان رسید و نتایج به Saved Messages ارسال شد.")
+        await event.edit(f"✅ اسکن {scanned_count} پیام تمام شد. کدهای جدید به Saved Messages ارسال شد.")
     else:
-        await event.edit("⚠️ هیچ موردی پیدا نشد.")
-
+        await event.edit(f"⚠️ از بین {scanned_count} پیام بررسی‌شده، کد جدیدی که هنوز پیدا نکرده باشیم یافت نشد.")
 
 # ============================================================
 # .REPLY
