@@ -316,17 +316,17 @@ async def set_scheduled_messages(event):
             scheduled += 1
         await event.edit(f"✅ {scheduled} پیام زمان‌بندی شد.")
     except Exception as error:
-        await event.edit(f"❌ خطا: {error}")
-# ============================================================
-# .SCANBAT (SMART SCANNING: FINDING PREVIOUS MESSAGE FROM THE SAME BOT)
+        await event.edit(f"❌ خطا: {error}")# ============================================================
+# .SCANBAT (SCANNING ENTIRE CHAT HISTORY WITHOUT LIMIT)
 # ============================================================
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.scanbat$"))
 async def scan_bat_emojis(event):
-    await event.edit("🔄 در حال اسکن هوشمند پیام‌ها و تطبیق ایموجی‌های پرمیوم...")
+    await event.edit("🔄 در حال اسکن کل تاریخچه چت (بدون محدودیت) برای پیدا کردن کدهای خفاش...")
     
     found_mapping = {}
-    async for message in client.iter_messages(event.chat_id, limit=600):
+    # حذف محدودیت limit تا تمام پیام‌های چت بررسی شوند
+    async for message in client.iter_messages(event.chat_id):
         text = message.raw_text or ""
         if "خفاش" in text and "کد" in text:
             match = re.search(r"کد\s*:\s*(\d+)", text)
@@ -338,7 +338,7 @@ async def scan_bat_emojis(event):
                 if code_str not in found_mapping:
                     bot_sender_id = message.sender_id
                     try:
-                        # بررسی 6 پیام قبلی در آن چت برای پیدا کردن پیامِ همان بات که ایموجی پرمیوم دارد
+                        # بررسی ۶ پیام قبلی در آن چت برای پیدا کردن پیامِ همان بات که ایموجی پرمیوم دارد
                         async for prev_msg in client.iter_messages(event.chat_id, max_id=message.id, limit=6):
                             if prev_msg.sender_id == bot_sender_id and prev_msg.entities:
                                 found_emoji = False
@@ -355,16 +355,17 @@ async def scan_bat_emojis(event):
                         pass
 
     if found_mapping:
-        result_lines = ["🦇 **مپینگ هوشمند کدهای خفاش:**\n"]
+        result_lines = ["🦇 **مپینگ کامل کدهای خفاش:**\n"]
         sorted_mapping = sorted(found_mapping.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 0)
         
         for code, doc_id in sorted_mapping:
             result_lines.append(f"'{code}': '{doc_id}',")
         
         await client.send_message("me", "\n".join(result_lines))
-        await event.edit("✅ اسکن هوشمند تمام شد و نتایج به Saved Messages ارسال گردید.")
+        await event.edit("✅ اسکن کامل تاریخچه چت به پایان رسید و نتایج به Saved Messages ارسال شد.")
     else:
         await event.edit("⚠️ هیچ موردی پیدا نشد.")
+
 
 # ============================================================
 # .REPLY
