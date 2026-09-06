@@ -400,51 +400,51 @@ async def cat_new_message(event):
 async def cat_edited_message(event):
     await check_cat_message(event.message)
 # ============================================================
-# .KHOFASH (BAT GAME AUTO-HUNTER WITH CUSTOM EMOJI ID MAPPING)
+# .KHOFASH (BAT GAME AUTO-HUNTER - FIXED REPLY WITH CORRECT EMOJI)
 # ============================================================
 
 khofash_chats = set()
 
-# دیکشنری کامل مپینگ کدهای خفاش به Document ID ایموجی پرمیوم
-BAT_CODE_MAPPING = {
-    "1": 5828139598399677018,
-    "2": 5827686629673803792,
-    "3": 5828137768743610848,
-    "4": 5827736077632282320,
-    "5": 5830144081111556696,
-    "6": 5827807962499918016,
-    "7": 5828095703833911977,
-    "8": 5827967623614177566,
-    "9": 5830194250624539956,
-    "10": 5830044845892181995,
-    "11": 5828144619216445823,
-    "12": 5827872691952033692,
-    "13": 5827921796313129733,
-    "14": 5827736876496199660,
-    "15": 5828014859664498597,
-    "16": 5830118178163793495,
-    "17": 5830016778280903350,
-    "18": 5827796245829131387,
-    "19": 5828055404155772825,
-    "20": 5830216485670232327,
-    "21": 5830226089217106100,
-    "22": 5830387013051752377,
-    "23": 5830310657123164469,
-    "24": 5830157146402071095,
-    "25": 5830464923758501937,
-    "26": 5827802293143085479,
-    "27": 5827846831953944550,
-    "28": 5828047969567384122,
-    "29": 5827706798840225857,
-    "30": 5827788154110746763,
-    "31": 5827881556764537070,
-    "32": 5829945000787451381,
-    "33": 5830362162370977979,
-    "34": 5828140203990065484,
-    "35": 5830240017796046141,
-    "36": 5830358739282041409,
-    "37": 5828064006975267325,
-    "38": 5829968266625293241
+# مپینگ Document ID ایموجی‌های پرمیوم خفاش به ایموجی متناظر برای ارسال در پاسخ
+BAT_EMOJI_REPLY_MAPPING = {
+    5828139598399677018: "✨",
+    5827686629673803792: "🧄",
+    5828137768743610848: "👀",
+    5827736077632282320: "👶",
+    5830144081111556696: "💦",
+    5827807962499918016: "👾",
+    5828095703833911977: "🌦️",
+    5827967623614177566: "💨",
+    5830194250624539956: "⚫️",
+    5830044845892181995: "🕷️",
+    5828144619216445823: "🧼",
+    5827872691952033692: "🐥",
+    5827921796313129733: "💙",
+    5827736876496199660: "💙",
+    5828014859664498597: "🙍‍♀",
+    5830118178163793495: "🧽",
+    5830016778280903350: "🌹",
+    5827796245829131387: "🤖",
+    5828055404155772825: "💥",
+    5830216485670232327: "🍋",
+    5830226089217106100: "🎭",
+    5830387013051752377: "🗻",
+    5830310657123164469: "🪞",
+    5830157146402071095: "🃏",
+    5830464923758501937: "❤️",
+    5827802293143085479: "🚒",
+    5827846831953944550: "🌕",
+    5828047969567384122: "🧛",
+    5827706798840225857: "🧊",
+    5827788154110746763: "😇",
+    5827881556764537070: "😈",
+    5829945000787451381: "🔥",
+    5830362162370977979: "🇫🇷",
+    5828140203990065484: "⭐️",
+    5830240017796046141: "🌧",
+    5830358739282041409: "🪙",
+    5828064006975267325: "⚡️",
+    5829968266625293241: "🌑"
 }
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.khofash$"))
@@ -465,49 +465,38 @@ async def process_khofash_message(message):
         return
     
     text = message.raw_text or ""
-    if "خفاش" in text and "میترسه" in text:
-        match = re.search(r"کد\s*:\s*(\d+)", text)
-        if not match:
-            match = re.search(r"\(.*?(\d+).*?\)", text)
-            
-        if match:
-            code_str = match.group(1).strip()
-            doc_id = BAT_CODE_MAPPING.get(code_str)
-            
-            if doc_id:
-                try:
-                    from telethon.tl.types import MessageEntityCustomEmoji
-                    from telethon.tl.custom import InlineBuilder
-                    
-                    # ساخت ایموجی پرمیوم به صورت مستقیم با Document ID در سریع‌ترین زمان و ریپلای روی پیام
-                    custom_emoji_entity = MessageEntityCustomEmoji(
-                        offset=0,
-                        length=len("🦇"),
-                        document_id=doc_id
-                    )
-                    
-                    await message.reply("🦇", file=None, entities=[custom_emoji_entity])
-                    
-                    chat = await message.get_chat()
-                    message_link = None
-                    
-                    if chat and getattr(chat, 'username', None):
-                        message_link = f"https://t.me/{chat.username}/{message.id}"
-                    else:
-                        c_id = str(message.chat_id)
-                        if c_id.startswith("-100"):
-                            clean_id = c_id[4:]
-                        elif c_id.startswith("-"):
-                            clean_id = c_id[1:]
-                        else:
-                            clean_id = c_id
-                        message_link = f"https://t.me/c/{clean_id}/{message.id}"
-                    
-                    report_text = f"🦇 خفاش کد {code_str} شکار شد:\n{message_link}"
-                    await client.send_message("me", report_text, link_preview=False)
-                    
-                except Exception as err:
-                    print("[KHOFASH ERROR]", err)
+    if "خفاش" in text:
+        matched_doc_id = None
+        
+        # بررسی موجودیت ایموجی پرمیوم (Custom Emoji) در متن یا entities پیام
+        if message.entities:
+            from telethon.tl.types import MessageEntityCustomEmoji
+            for entity in message.entities:
+                if isinstance(entity, MessageEntityCustomEmoji):
+                    if entity.document_id in BAT_EMOJI_REPLY_MAPPING:
+                        matched_doc_id = entity.document_id
+                        break
+        
+        if matched_doc_id:
+            reply_emoji = BAT_EMOJI_REPLY_MAPPING[matched_doc_id]
+            try:
+                # ریپلای روی پیام خفاش و ارسال ایموجی صحیح
+                await message.reply(reply_emoji)
+                
+                # ارسال گزارش به Saved Messages
+                chat = await message.get_chat()
+                if chat and getattr(chat, 'username', None):
+                    message_link = f"https://t.me/{chat.username}/{message.id}"
+                else:
+                    c_id = str(message.chat_id)
+                    clean_id = c_id[4:] if c_id.startswith("-100") else (c_id[1:] if c_id.startswith("-") else c_id)
+                    message_link = f"https://t.me/c/{clean_id}/{message.id}"
+                
+                report_text = f"🦇 خفاش با ایموجی '{reply_emoji}' شکار شد:\n{message_link}"
+                await client.send_message("me", report_text, link_preview=False)
+                
+            except Exception as err:
+                print("[KHOFASH ERROR]", err)
 
 @client.on(events.NewMessage())
 async def khofash_new_message(event):
@@ -517,22 +506,6 @@ async def khofash_new_message(event):
 async def khofash_edited_message(event):
     await process_khofash_message(event.message)
 
-# ============================================================
-# .DELETE
-# ============================================================
-
-@client.on(events.NewMessage(outgoing=True, pattern=r"^\.delete(?:\s+(\d+))?$"))
-async def delete_messages(event):
-    match = event.pattern_match
-    count = int(match.group(1)) if match.group(1) else 10
-    deleted = 0
-    async for message in client.iter_messages(event.chat_id, limit=count, from_user="me"):
-        try:
-            await message.delete()
-            deleted += 1
-        except Exception:
-            pass
-    print(f"[DELETE] Deleted {deleted} messages.")
 
 # ============================================================
 # .SAVE
