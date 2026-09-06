@@ -316,68 +316,7 @@ async def set_scheduled_messages(event):
             scheduled += 1
         await event.edit(f"✅ {scheduled} پیام زمان‌بندی شد.")
     except Exception as error:
-        await event.edit(f"❌ خطا: {error}")# ============================================================
-# ============================================================
-# .SCANBAT (SMART SCANNING WITH 2000 LIMIT & ALREADY FOUND FILTER)
-# ============================================================
-
-# کدهایی که تا الان پیدا کرده‌ایم (برای رد کردن و جلوگیری از پردازش تکراری)
-ALREADY_FOUND_CODES = {
-    "1", "2", "4", "5", "6", "7", "8", "9", "10", "11", 
-    "12", "13", "16", "17", "18", "19", "21", "22", "24", 
-    "25", "26", "27", "29", "30", "31", "32", "33", "37", "38"
-}
-
-@client.on(events.NewMessage(outgoing=True, pattern=r"^\.scanbat$"))
-async def scan_bat_emojis(event):
-    await event.edit("🔄 اسکن هوشمند با لیمیت ۲۰۰۰ پیام و فیلتر کدهای تکراری شروع شد...")
-    
-    found_mapping = {}
-    scanned_count = 0
-    
-    # محدود کردن اسکن به ۲۰۰۰ پیام آخر برای سرعت بالا
-    async for message in client.iter_messages(event.chat_id, limit=2000):
-        scanned_count += 1
-        text = message.raw_text or ""
-        
-        if "خفاش" in text and "کد" in text:
-            match = re.search(r"کد\s*:\s*(\d+)", text)
-            if not match:
-                match = re.search(r"\(.*?(\d+).*?\)", text)
-            
-            if match:
-                code_str = match.group(1).strip()
-                
-                # اگر این کد جزو کدهای از پیش‌گفته نبود و جدید بود، بررسی کن
-                if code_str not in ALREADY_FOUND_CODES and code_str not in found_mapping:
-                    bot_sender_id = message.sender_id
-                    try:
-                        async for prev_msg in client.iter_messages(event.chat_id, max_id=message.id, limit=6):
-                            if prev_msg.sender_id == bot_sender_id and prev_msg.entities:
-                                found_emoji = False
-                                for entity in prev_msg.entities:
-                                    if type(entity).__name__ == 'MessageEntityCustomEmoji':
-                                        doc_id = getattr(entity, 'document_id', None)
-                                        if doc_id:
-                                            found_mapping[code_str] = doc_id
-                                            found_emoji = True
-                                            break
-                                if found_emoji:
-                                    break
-                    except Exception:
-                        pass
-
-    if found_mapping:
-        result_lines = ["🦇 **کدهای جدیدِ کشف‌شده:**\n"]
-        sorted_mapping = sorted(found_mapping.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 0)
-        
-        for code, doc_id in sorted_mapping:
-            result_lines.append(f"'{code}': '{doc_id}',")
-        
-        await client.send_message("me", "\n".join(result_lines))
-        await event.edit(f"✅ اسکن {scanned_count} پیام تمام شد. کدهای جدید به Saved Messages ارسال شد.")
-    else:
-        await event.edit(f"⚠️ از بین {scanned_count} پیام بررسی‌شده، کد جدیدی که هنوز پیدا نکرده باشیم یافت نشد.")
+        await event.edit(f"❌ خطا: {error}")
 
 # ============================================================
 # .REPLY
@@ -461,51 +400,51 @@ async def cat_new_message(event):
 async def cat_edited_message(event):
     await check_cat_message(event.message)
 # ============================================================
-# .KHOFASH (BAT GAME AUTO-HUNTER WITH CODE MAPPING, SILENT MODE & SAVED MESSAGES REPORT)
+# .KHOFASH (BAT GAME AUTO-HUNTER WITH CUSTOM EMOJI ID MAPPING)
 # ============================================================
 
 khofash_chats = set()
 
-# دیکشنری کامل کدهای خفاش (۳۲ مدل بر اساس درخواست شما)
+# دیکشنری کامل مپینگ کدهای خفاش به Document ID ایموجی پرمیوم
 BAT_CODE_MAPPING = {
-    "1": "✨",
-    "2": "🧄",
-    "3": "👀",
-    "4": "👶",
-    "5": "💦",
-    "6": "👾",
-    "7": "🌦️",
-    "8": "💨",
-    "9": "⚫️",
-    "10": "🕷️",
-    "11": "🧼",
-    "12": "🐥",
-    "13": "💙",
-    "14": "💙",
-    "15": "🙍‍♀",
-    "16": "🧽",
-    "17": "🌹",
-    "18": "🤖",
-    "19": "💥",
-    "20": "🍋",
-    "21": "🎭",
-    "22": "🗻",
-    "23": "🪞",
-    "24": "🃏",
-    "25": "❤️",
-    "26": "🚒",
-    "27": "🌕",
-    "28": "🧛",
-    "29": "🧊",
-    "30": "😇",
-    "31": "😈",
-    "32": "🔥",
-    "33": "🇫🇷",
-    "34": "⭐️",
-    "35": "🌧",
-    "36": "🪙",
-    "37": "⚡️",
-    "38": "🌑"
+    "1": 5828139598399677018,
+    "2": 5827686629673803792,
+    "3": 5828137768743610848,
+    "4": 5827736077632282320,
+    "5": 5830144081111556696,
+    "6": 5827807962499918016,
+    "7": 5828095703833911977,
+    "8": 5827967623614177566,
+    "9": 5830194250624539956,
+    "10": 5830044845892181995,
+    "11": 5828144619216445823,
+    "12": 5827872691952033692,
+    "13": 5827921796313129733,
+    "14": 5827736876496199660,
+    "15": 5828014859664498597,
+    "16": 5830118178163793495,
+    "17": 5830016778280903350,
+    "18": 5827796245829131387,
+    "19": 5828055404155772825,
+    "20": 5830216485670232327,
+    "21": 5830226089217106100,
+    "22": 5830387013051752377,
+    "23": 5830310657123164469,
+    "24": 5830157146402071095,
+    "25": 5830464923758501937,
+    "26": 5827802293143085479,
+    "27": 5827846831953944550,
+    "28": 5828047969567384122,
+    "29": 5827706798840225857,
+    "30": 5827788154110746763,
+    "31": 5827881556764537070,
+    "32": 5829945000787451381,
+    "33": 5830362162370977979,
+    "34": 5828140203990065484,
+    "35": 5830240017796046141,
+    "36": 5830358739282041409,
+    "37": 5828064006975267325,
+    "38": 5829968266625293241
 }
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.khofash$"))
@@ -526,30 +465,35 @@ async def process_khofash_message(message):
         return
     
     text = message.raw_text or ""
-    # بررسی پیام خفاش بر اساس متن نمونه شما
     if "خفاش" in text and "میترسه" in text:
-        # استخراج شماره کد از داخل متن
         match = re.search(r"کد\s*:\s*(\d+)", text)
         if not match:
             match = re.search(r"\(.*?(\d+).*?\)", text)
             
         if match:
             code_str = match.group(1).strip()
-            emoji = BAT_CODE_MAPPING.get(code_str)
+            doc_id = BAT_CODE_MAPPING.get(code_str)
             
-            if emoji:
+            if doc_id:
                 try:
-                    await message.reply(emoji)
+                    from telethon.tl.types import MessageEntityCustomEmoji
+                    from telethon.tl.custom import InlineBuilder
                     
-                    # استخراج لینک پیام (پشتیبانی از گروه‌های عمومی و خصوصی/سوپرگروه‌ها)
+                    # ساخت ایموجی پرمیوم به صورت مستقیم با Document ID در سریع‌ترین زمان و ریپلای روی پیام
+                    custom_emoji_entity = MessageEntityCustomEmoji(
+                        offset=0,
+                        length=len("🦇"),
+                        document_id=doc_id
+                    )
+                    
+                    await message.reply("🦇", file=None, entities=[custom_emoji_entity])
+                    
                     chat = await message.get_chat()
                     message_link = None
                     
                     if chat and getattr(chat, 'username', None):
-                        # گروه عمومی دارای یوزرنیم
                         message_link = f"https://t.me/{chat.username}/{message.id}"
                     else:
-                        # گروه خصوصی یا سوپرگروه (با حذف منفی از ابتدای آیدی چت)
                         c_id = str(message.chat_id)
                         if c_id.startswith("-100"):
                             clean_id = c_id[4:]
@@ -559,7 +503,6 @@ async def process_khofash_message(message):
                             clean_id = c_id
                         message_link = f"https://t.me/c/{clean_id}/{message.id}"
                     
-                    # ارسال گزارش به Saved Messages (چت شخصی با خود کاربر یا me)
                     report_text = f"🦇 خفاش کد {code_str} شکار شد:\n{message_link}"
                     await client.send_message("me", report_text, link_preview=False)
                     
