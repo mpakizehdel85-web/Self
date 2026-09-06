@@ -401,8 +401,8 @@ async def cat_edited_message(event):
   
 await check_cat_message(event.message)# ============================================================
 
-## ============================================================
-# .KHOFASH (ULTRA-FAST BAT GAME AUTO-HUNTER)
+# ============================================================
+# .KHOFASH (BAT GAME AUTO-HUNTER - OPTIMIZED & FAST)
 # ============================================================
 
 khofash_chats = set()
@@ -466,20 +466,18 @@ async def khofash_new_message(event):
     if event.chat_id not in khofash_chats:
         return
     
-    entities = event.message.entities
-    if not entities:
-        return
+    if event.entities:
+        for entity in event.entities:
+            from telethon.tl.types import MessageEntityCustomEmoji
+            if isinstance(entity, MessageEntityCustomEmoji):
+                doc_id = entity.document_id
+                if doc_id in BAT_ID_TO_REPLY_EMOJI:
+                    try:
+                        await event.reply(BAT_ID_TO_REPLY_EMOJI[doc_id])
+                    except Exception:
+                        pass
+                    break
 
-    from telethon.tl.types import MessageEntityCustomEmoji
-    for entity in entities:
-        if isinstance(entity, MessageEntityCustomEmoji):
-            doc_id = entity.document_id
-            if doc_id in BAT_ID_TO_REPLY_EMOJI:
-                try:
-                    await event.message.reply(BAT_ID_TO_REPLY_EMOJI[doc_id])
-                except Exception:
-                    pass
-                break
 
 # ============================================================
 # .UPTIME
