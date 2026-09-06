@@ -398,9 +398,7 @@ async def cat_new_message(event):
 
 @client.on(events.MessageEdited())
 async def cat_edited_message(event):
-  
-await check_cat_message(event.message)# ============================================================
-
+    await check_cat_message(event.message)
 # ============================================================
 # .KHOFASH (BAT GAME AUTO-HUNTER - OPTIMIZED & FAST)
 # ============================================================
@@ -477,7 +475,6 @@ async def khofash_new_message(event):
                     except Exception:
                         pass
                     break
-
 
 # ============================================================
 # .UPTIME
