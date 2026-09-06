@@ -398,12 +398,12 @@ async def cat_new_message(event):
 
 @client.on(events.MessageEdited())
 async def cat_edited_message(event):
-    await check_cat_message(event.message)# ============================================================
-# .KHOFASH (DEBUGGED & FIXED ULTRA-FAST VERSION)
-# ============================================================
+  
+await check_cat_message(event.message)# ============================================================
 
-from telethon.tl.functions.messages import SendMessageRequest
-from telethon.tl.types import MessageEntityCustomEmoji
+# ============================================================
+# .KHOFASH (ULTRA-FAST BAT GAME AUTO-HUNTER)
+# ============================================================
 
 khofash_chats = set()
 
@@ -455,7 +455,6 @@ async def start_khofash(event):
         await event.delete()
     except Exception:
         pass
-    print("[KHOFASH] Started in chat:", event.chat_id)
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopkhofash$"))
 async def stop_khofash(event):
@@ -467,30 +466,20 @@ async def khofash_new_message(event):
     if event.chat_id not in khofash_chats:
         return
     
-    # چاپ متن یا وجود انتیتی برای تست اینکه آیا پیام‌ها خوانده می‌شوند یا خیر
-    message = event.message
-    text = message.raw_text or ""
-    
-    # اگر کلمه خفاش یا انتیتی پرمیوم بود بررسی کن
-    if message.entities:
-        for entity in message.entities:
-            if isinstance(entity, MessageEntityCustomEmoji):
-                doc_id = entity.document_id
-                print(f"[KHOFASH FOUND] Custom Emoji ID: {doc_id}")
-                emoji_to_send = BAT_ID_TO_REPLY_EMOJI.get(doc_id)
-                if emoji_to_send:
-                    try:
-                        await client(SendMessageRequest(
-                            peer=event.chat_id,
-                            message=emoji_to_send,
-                            reply_to=message.id
-                        ))
-                        print(f"[KHOFASH SUCCESS] Replied with: {emoji_to_send}")
-                    except Exception as e:
-                        print("[KHOFASH SEND ERROR]", e)
-                    break
+    entities = event.message.entities
+    if not entities:
+        return
 
-
+    from telethon.tl.types import MessageEntityCustomEmoji
+    for entity in entities:
+        if isinstance(entity, MessageEntityCustomEmoji):
+            doc_id = entity.document_id
+            if doc_id in BAT_ID_TO_REPLY_EMOJI:
+                try:
+                    await event.message.reply(BAT_ID_TO_REPLY_EMOJI[doc_id])
+                except Exception:
+                    pass
+                break
 
 # ============================================================
 # .UPTIME
