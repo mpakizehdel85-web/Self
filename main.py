@@ -323,7 +323,7 @@ async def stop_cat(event):
     cat_chats.discard(event.chat_id)
     await event.edit("🛑 حالت نجات پیشی متوقف شد.")
 # ============================================================
-# KHOFASH (BAT GAME ULTRA-FAST AUTO-HUNTER - NO EDITED MESSAGES)
+# KHOFASH (ULTRA-FAST SPEED OPTIMIZED)
 # ============================================================
 
 khofash_chats = set()
@@ -353,46 +353,20 @@ async def stop_khofash(event):
 
 @client.on(events.NewMessage())
 async def khofash_new_message(event):
-    message = event.message
-    if message.chat_id not in khofash_chats:
+    if event.chat_id not in khofash_chats or event.message.edit_date is not None:
         return
     
-    # نادیده گرفتن پیام‌های ویرایش‌شده
-    if message.edit_date is not None:
-        return
-
-    text = message.raw_text or ""
-    
-    if "خفاش" in text and "میترسه" in text and "کد" in text:
-        match = re.search(r"کد\s*:\s*(\d+)", text)
-        if not match:
-            match = re.search(r"\(.*?(\d+).*?\)", text)
-            
+    text = event.raw_text or ""
+    if "خفاش" in text and "میترسه" in text:
+        match = re.search(r"کد\s*:\s*(\d+)", text) or re.search(r"\(.*?(\d+).*?\)", text)
         if match:
-            code_str = match.group(1).strip()
-            emoji = BAT_CODE_MAPPING.get(code_str)
-            
+            emoji = BAT_CODE_MAPPING.get(match.group(1))
             if emoji:
                 try:
-                    await message.reply(emoji)
-                    
-                    async def send_background_report():
-                        try:
-                            chat = await message.get_chat()
-                            if chat and getattr(chat, 'username', None):
-                                message_link = f"https://t.me/{chat.username}/{message.id}"
-                            else:
-                                c_id = str(message.chat_id)
-                                clean_id = c_id[4:] if c_id.startswith("-100") else (c_id[1:] if c_id.startswith("-") else c_id)
-                                message_link = f"https://t.me/c/{clean_id}/{message.id}"
-                            await client.send_message("me", f"🦇 خفاش کد {code_str} شکار شد:\n{message_link}", link_preview=False)
-                        except Exception:
-                            pass
-                    
-                    asyncio.create_task(send_background_report())
-                    
-                except Exception as err:
-                    print("[KHOFASH ERROR]", err)
+                    await event.reply(emoji)
+                except Exception:
+                    pass
+
 
 # ============================================================
 # OTHER UTILITIES & AUTOMATIONS (.delete, .save, .uptime, .fish, etc.)
