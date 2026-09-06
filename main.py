@@ -478,7 +478,6 @@ async def process_khofash_message(message):
             
             if emoji:
                 try:
-                    await asyncio.sleep(0.0001) # سرعت بالا برای سبقت گرفتن از بقیه
                     await message.reply(emoji)
                     
                     # استخراج لینک پیام (پشتیبانی از گروه‌های عمومی و خصوصی/سوپرگروه‌ها)
