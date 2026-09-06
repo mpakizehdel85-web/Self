@@ -449,29 +449,16 @@ BAT_ID_TO_REPLY_EMOJI = {
     5829968266625293241: "🌑"
 }
 
-@client.on(events.NewMessage(outgoing=True, pattern=r"^\.khofash$"))
-async def start_khofash(event):
-    khofash_chats.add(event.chat_id)
-    try:
-        await event.delete()
-    except Exception:
-        pass
-
-@client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopkhofash$"))
-async def stop_khofash(event):
-    khofash_chats.discard(event.chat_id)
-    await event.edit("🛑 شکارچی خفاش متوقف شد.")
-
 @client.on(events.NewMessage())
 async def khofash_new_message(event):
     if event.chat_id not in khofash_chats:
         return
     
-    entities = event.message.entities
-    if not entities:
+    message = event.message
+    if not message.entities:
         return
 
-    for entity in entities:
+    for entity in message.entities:
         if isinstance(entity, MessageEntityCustomEmoji):
             doc_id = entity.document_id
             emoji_to_send = BAT_ID_TO_REPLY_EMOJI.get(doc_id)
@@ -480,11 +467,12 @@ async def khofash_new_message(event):
                     await client(SendMessageRequest(
                         peer=event.chat_id,
                         message=emoji_to_send,
-                        reply_to=event.message.id
+                        reply_to=message.id
                     ))
-                except Exception:
-                    pass
+                except Exception as e:
+                    print("[KHOFASH ERROR]", e)
                 break
+
 
 # ============================================================
 # .UPTIME
