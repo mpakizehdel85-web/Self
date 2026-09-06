@@ -638,7 +638,22 @@ async def user_info(event):
         name = f"{target.first_name or ''} {target.last_name or ''}".strip()
         await event.edit(f"👤 **مشخصات:**\n• نام: `{name}`\n• آیدی: `{target.id}`\n• یوزرنیم: @{target.username or 'ندارد'}")
     except Exception as error:
+    
         await event.edit(f"❌ خطا: {error}")
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.showcache$"))
+async def show_cache_status(event):
+    count = len(bat_cache)
+    items_str = "\n".join([f"ID: `{k}` ➔ کد: **{v}**" for k, v in bat_cache.items()])
+    if not items_str:
+        items_str = "هنوز هیچ خفاشی یاد نگرفته!"
+    await event.edit(f"📊 **تعداد کل یادگرفته‌ها:** {count}\n\n{items_str}")
+
+async def main():
+    global MAIN_LOOP
+    MAIN_LOOP = asyncio.get_running_loop()
+    start_web_server()
+    print("Telegram Userbot starting...")
+    # ...
 
 # ============================================================
 # .TAG, .KAZINO, .STOPALL, .STATUS, .PING, .WHOAMI & MAIN
