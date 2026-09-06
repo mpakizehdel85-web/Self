@@ -400,12 +400,14 @@ async def cat_new_message(event):
 async def cat_edited_message(event):
     await check_cat_message(event.message)
 # ============================================================
-# .KHOFASH (BAT GAME AUTO-HUNTER - CORRECT PREMIUM ID TO EMOJI REPLY)
+# .KHOFASH (ULTRA-OPTIMIZED FINAL VERSION)
 # ============================================================
+
+from telethon.tl.functions.messages import SendMessageRequest
+from telethon.tl.types import MessageEntityCustomEmoji
 
 khofash_chats = set()
 
-# مپینگ Document ID ایموجی‌های پرمیوم به ایموجیِ پاسخی که باید ارسال شود
 BAT_ID_TO_REPLY_EMOJI = {
     5828139598399677018: "✨",
     5827686629673803792: "🧄",
@@ -460,52 +462,29 @@ async def stop_khofash(event):
     khofash_chats.discard(event.chat_id)
     await event.edit("🛑 شکارچی خفاش متوقف شد.")
 
-async def process_khofash_message(message):
-    if message.chat_id not in khofash_chats:
-        return
-    
-    text = message.raw_text or ""
-    if "خفاش" in text or message.entities:
-        matched_doc_id = None
-        
-        # استخراج کد (document_id) ایموجی پرمیوم خفاش از پیام
-        if message.entities:
-            from telethon.tl.types import MessageEntityCustomEmoji
-            for entity in message.entities:
-                if isinstance(entity, MessageEntityCustomEmoji):
-                    if entity.document_id in BAT_ID_TO_REPLY_EMOJI:
-                        matched_doc_id = entity.document_id
-                        break
-        
-        if matched_doc_id:
-            reply_emoji = BAT_ID_TO_REPLY_EMOJI[matched_doc_id]
-            try:
-                # ریپلای زدن روی پیام خفاش و فرستادن ایموجی هدف
-                await message.reply(reply_emoji)
-                
-                # گزارش به Saved Messages
-                chat = await message.get_chat()
-                if chat and getattr(chat, 'username', None):
-                    message_link = f"https://t.me/{chat.username}/{message.id}"
-                else:
-                    c_id = str(message.chat_id)
-                    clean_id = c_id[4:] if c_id.startswith("-100") else (c_id[1:] if c_id.startswith("-") else c_id)
-                    message_link = f"https://t.me/c/{clean_id}/{message.id}"
-                
-                report_text = f"🦇 خفاش با ایموجی '{reply_emoji}' (شناسه پرمیوم: `{matched_doc_id}`) شکار شد:\n{message_link}"
-                await client.send_message("me", report_text, link_preview=False)
-                
-            except Exception as err:
-                print("[KHOFASH ERROR]", err)
-
 @client.on(events.NewMessage())
 async def khofash_new_message(event):
-    await process_khofash_message(event.message)
+    if event.chat_id not in khofash_chats:
+        return
+    
+    entities = event.message.entities
+    if not entities:
+        return
 
-@client.on(events.MessageEdited())
-async def khofash_edited_message(event):
-    await process_khofash_message(event.message)
-
+    for entity in entities:
+        if isinstance(entity, MessageEntityCustomEmoji):
+            doc_id = entity.document_id
+            emoji_to_send = BAT_ID_TO_REPLY_EMOJI.get(doc_id)
+            if emoji_to_send:
+                try:
+                    await client(SendMessageRequest(
+                        peer=event.chat_id,
+                        message=emoji_to_send,
+                        reply_to=event.message.id
+                    ))
+                except Exception:
+                    pass
+                break
 
 # ============================================================
 # .UPTIME
