@@ -400,7 +400,7 @@ async def cat_new_message(event):
 async def cat_edited_message(event):
     await check_cat_message(event.message)
 # ============================================================
-# .KHOFASH (BAT GAME AUTO-HUNTER WITH CODE MAPPING & SILENT MODE)
+# .KHOFASH (BAT GAME AUTO-HUNTER WITH CODE MAPPING, SILENT MODE & SAVED MESSAGES REPORT)
 # ============================================================
 
 khofash_chats = set()
@@ -426,7 +426,7 @@ BAT_CODE_MAPPING = {
     "19": "💥",
     "20": "🍋",
     "21": "🎭",
-    "22": "🗻",
+    "22": "🏔⛰",
     "23": "🪞",
     "24": "🃏",
     "25": "❤️",
@@ -462,9 +462,9 @@ async def process_khofash_message(message):
         return
     
     text = message.raw_text or ""
-    # بررسی پیام خفاش بر اساس متن نمونه شما (خفاش میویی توی گروه پیدا شد / از ... میترسه)
+    # بررسی پیام خفاش بر اساس متن نمونه شما
     if "خفاش" in text and "میترسه" in text:
-        # استخراج شماره کد از داخل متن (مثل کد : 9 یا شماره‌های داخل پرانتز)
+        # استخراج شماره کد از داخل متن
         match = re.search(r"کد\s*:\s*(\d+)", text)
         if not match:
             match = re.search(r"\(.*?(\d+).*?\)", text)
@@ -477,6 +477,29 @@ async def process_khofash_message(message):
                 try:
                     await asyncio.sleep(0.3) # سرعت بالا برای سبقت گرفتن از بقیه
                     await message.reply(emoji)
+                    
+                    # استخراج لینک پیام (پشتیبانی از گروه‌های عمومی و خصوصی/سوپرگروه‌ها)
+                    chat = await message.get_chat()
+                    message_link = None
+                    
+                    if chat and getattr(chat, 'username', None):
+                        # گروه عمومی دارای یوزرنیم
+                        message_link = f"https://t.me/{chat.username}/{message.id}"
+                    else:
+                        # گروه خصوصی یا سوپرگروه (با حذف منفی از ابتدای آیدی چت)
+                        c_id = str(message.chat_id)
+                        if c_id.startswith("-100"):
+                            clean_id = c_id[4:]
+                        elif c_id.startswith("-"):
+                            clean_id = c_id[1:]
+                        else:
+                            clean_id = c_id
+                        message_link = f"https://t.me/c/{clean_id}/{message.id}"
+                    
+                    # ارسال گزارش به Saved Messages (چت شخصی با خود کاربر یا me)
+                    report_text = f"🦇 خفاش کد {code_str} شکار شد:\n{message_link}"
+                    await client.send_message("me", report_text, link_preview=False)
+                    
                 except Exception as err:
                     print("[KHOFASH ERROR]", err)
 
