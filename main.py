@@ -400,50 +400,17 @@ async def cat_new_message(event):
 async def cat_edited_message(event):
     await check_cat_message(event.message)
 # ============================================================
-# .KHOFASH (BAT GAME AUTO-HUNTER - PREVIOUS METHOD)
+# .KHOFASH (BAT GAME AUTO-HUNTER - ULTRA FAST)
 # ============================================================
 
 khofash_chats = set()
 
-BAT_ID_TO_REPLY_EMOJI = {
-    1: "✨",
-    2: "🧄",
-    3: "👀",
-    4: "👶",
-    5: "💦",
-    6: "👾",
-    7: "🌦️",
-    8: "💨",
-    9: "⚫️",
-    10: "🕷️",
-    11: "🧼",
-    12: "🐥",
-    13: "💙",
-    14: "💙",
-    15: "🙍‍♀",
-    16: "🧽",
-    17: "🌹",
-    18: "🤖",
-    19: "💥",
-    20: "🍋",
-    21: "🎭",
-    22: "🗻",
-    23: "🪞",
-    24: "🃏",
-    25: "❤️",
-    26: "🚒",
-    27: "🌕",
-    28: "🧛",
-    29: "🧊",
-    30: "😇",
-    31: "😈",
-    32: "🔥",
-    33: "🇫🇷",
-    34: "⭐️",
-    35: "🌧",
-    36: "🪙",
-    37: "⚡️",
-    38: "🌑"
+BAT_CODE_TO_EMOJI = {
+    1: "✨", 2: "🧄", 3: "👀", 4: "👶", 5: "💦", 6: "👾", 7: "🌦️", 8: "💨",
+    9: "⚫️", 10: "🕷️", 11: "🧼", 12: "🐥", 13: "💙", 14: "💙", 15: "🙍‍♀", 16: "🧽",
+    17: "🌹", 18: "🤖", 19: "💥", 20: "🍋", 21: "🎭", 22: "🗻", 23: "🪞", 24: "🃏",
+    25: "❤️", 26: "🚒", 27: "🌕", 28: "🧛", 29: "🧊", 30: "😇", 31: "😈", 32: "🔥",
+    33: "🇫🇷", 34: "⭐️", 35: "🌧", 36: "🪙", 37: "⚡️", 38: "🌑"
 }
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.khofash$"))
@@ -464,17 +431,23 @@ async def khofash_new_message(event):
     if event.chat_id not in khofash_chats:
         return
     
-    if event.entities:
-        for entity in event.entities:
-            from telethon.tl.types import MessageEntityCustomEmoji
-            if isinstance(entity, MessageEntityCustomEmoji):
-                doc_id = entity.document_id
-                if doc_id in BAT_ID_TO_REPLY_EMOJI:
-                    try:
-                        await event.reply(BAT_ID_TO_REPLY_EMOJI[doc_id])
-                    except Exception:
-                        pass
-                    break
+    text = event.raw_text
+    if not text or "کد" not in text:
+        return
+
+    try:
+        # استخراج سریع عدد بعد از کلمه کد بدون استفاده از Regex
+        parts = text.split("کد")
+        if len(parts) > 1:
+            # جدا کردن کاراکترهای عددی از بخش دوم متن
+            num_str = "".join(filter(str.isdigit, parts[1]))
+            if num_str:
+                code_num = int(num_str)
+                emoji = BAT_CODE_TO_EMOJI.get(code_num)
+                if emoji:
+                    await event.reply(emoji)
+    except Exception as err:
+        print("[KHOFASH ERROR]", err)
 
 # ============================================================
 # .UPTIME
