@@ -482,6 +482,51 @@ async def khofash_new_message(event):
 @client.on(events.MessageEdited())
 async def khofash_edited_message(event):
     await process_khofash_message(event.message)
+# ============================================================
+# .BAT5 (BAT GAME AUTO-HUNTER - HYPER OPTIMIZED)
+# ============================================================
+
+import asyncio
+from telethon.tl.types import MessageEntityCustomEmoji
+
+bat5_chats = set()
+
+BAT_ID_TO_REPLY_EMOJI = {
+    5830144081111556696: "💦"
+}
+
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.bat5$"))
+async def start_bat5(event):
+    bat5_chats.add(event.chat_id)
+    try:
+        await event.delete()
+    except Exception:
+        pass
+
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopbat5$"))
+async def stop_bat5(event):
+    bat5_chats.discard(event.chat_id)
+    await event.edit("🛑 شکارچی بت ۵ متوقف شد.")
+
+async def process_bat5_message(message):
+    if message.chat_id not in bat5_chats:
+        return
+    
+    if message.entities:
+        for entity in message.entities:
+            if isinstance(entity, MessageEntityCustomEmoji):
+                emoji_char = BAT_ID_TO_REPLY_EMOJI.get(entity.document_id)
+                if emoji_char:
+                    asyncio.create_task(message.reply(emoji_char))
+                    break
+
+@client.on(events.NewMessage())
+async def bat5_new_message(event):
+    await process_bat5_message(event.message)
+
+@client.on(events.MessageEdited())
+async def bat5_edited_message(event):
+    await process_bat5_message(event.message)
 
 # ============================================================
 # .UPTIME
