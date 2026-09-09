@@ -400,50 +400,50 @@ async def cat_new_message(event):
 async def cat_edited_message(event):
     await check_cat_message(event.message)
 # ============================================================
-# .KHOFASH (BAT GAME AUTO-HUNTER WITH CODE MAPPING & SILENT MODE)
+# .KHOFASH (BAT GAME AUTO-HUNTER - OPTIMIZED & FAST)
 # ============================================================
 
 khofash_chats = set()
 
-BAT_CODE_MAPPING = {
-    "1": "✨",
-    "2": "🧄",
-    "3": "👀",
-    "4": "👶",
-    "5": "💦",
-    "6": "👾",
-    "7": "🌦️",
-    "8": "💨",
-    "9": "⚫️",
-    "10": "🕷️",
-    "11": "🧼",
-    "12": "🐥",
-    "13": "💙",
-    "14": "💙",
-    "15": "🙍‍♀",
-    "16": "🧽",
-    "17": "🌹",
-    "18": "🤖",
-    "19": "💥",
-    "20": "🍋",
-    "21": "🎭",
-    "22": "🗻",
-    "23": "🪞",
-    "24": "🃏",
-    "25": "❤️",
-    "26": "🚒",
-    "27": "🌕",
-    "28": "🧛",
-    "29": "🧊",
-    "30": "😇",
-    "31": "😈",
-    "32": "🔥",
-    "33": "🇫🇷",
-    "34": "⭐️",
-    "35": "🌧",
-    "36": "🪙",
-    "37": "⚡️",
-    "38": "🌑"
+BAT_ID_TO_REPLY_EMOJI = {
+    5828139598399677018: "✨",
+    5827686629673803792: "🧄",
+    5828137768743610848: "👀",
+    5827736077632282320: "👶",
+    5830144081111556696: "💦",
+    5827807962499918016: "👾",
+    5828095703833911977: "🌦️",
+    5827967623614177566: "💨",
+    5830194250624539956: "⚫️",
+    5830044845892181995: "🕷️",
+    5828144619216445823: "🧼",
+    5827872691952033692: "🐥",
+    5827921796313129733: "💙",
+    5827736876496199660: "💙",
+    5828014859664498597: "🙍‍♀",
+    5830118178163793495: "🧽",
+    5830016778280903350: "🌹",
+    5827796245829131387: "🤖",
+    5828055404155772825: "💥",
+    5830216485670232327: "🍋",
+    5830226089217106100: "🎭",
+    5830387013051752377: "🗻",
+    5830310657123164469: "🪞",
+    5830157146402071095: "🃏",
+    5830464923758501937: "❤️",
+    5827802293143085479: "🚒",
+    5827846831953944550: "🌕",
+    5828047969567384122: "🧛",
+    5827706798840225857: "🧊",
+    5827788154110746763: "😇",
+    5827881556764537070: "😈",
+    5829945000787451381: "🔥",
+    5830362162370977979: "🇫🇷",
+    5828140203990065484: "⭐️",
+    5830240017796046141: "🌧",
+    5830358739282041409: "🪙",
+    5828064006975267325: "⚡️",
+    5829968266625293241: "🌑"
 }
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.khofash$"))
@@ -463,21 +463,17 @@ async def process_khofash_message(message):
     if message.chat_id not in khofash_chats:
         return
     
-    text = message.raw_text or ""
-    if "خفاش" in text and "میترسه" in text:
-        match = re.search(r"کد\s*:\s*(\d+)", text)
-        if not match:
-            match = re.search(r"\(.*?(\d+).*?\)", text)
-            
-        if match:
-            code_str = match.group(1).strip()
-            emoji = BAT_CODE_MAPPING.get(code_str)
-            
-            if emoji:
-                try:
-                    await message.reply(emoji)
-                except Exception as err:
-                    print("[KHOFASH ERROR]", err)
+    if message.entities:
+        for entity in message.entities:
+            from telethon.tl.types import MessageEntityCustomEmoji
+            if isinstance(entity, MessageEntityCustomEmoji):
+                doc_id = entity.document_id
+                if doc_id in BAT_ID_TO_REPLY_EMOJI:
+                    try:
+                        await message.reply(BAT_ID_TO_REPLY_EMOJI[doc_id])
+                    except Exception as err:
+                        print("[KHOFASH ERROR]", err)
+                    break
 
 @client.on(events.NewMessage())
 async def khofash_new_message(event):
@@ -486,6 +482,7 @@ async def khofash_new_message(event):
 @client.on(events.MessageEdited())
 async def khofash_edited_message(event):
     await process_khofash_message(event.message)
+
 
 # ============================================================
 # .UPTIME
