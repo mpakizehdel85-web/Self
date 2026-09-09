@@ -400,8 +400,11 @@ async def cat_new_message(event):
 async def cat_edited_message(event):
     await check_cat_message(event.message)
 # ============================================================
-# .KHOFASH (BAT GAME AUTO-HUNTER - OPTIMIZED & FAST)
+# .KHOFASH (BAT GAME AUTO-HUNTER - HYPER OPTIMIZED)
 # ============================================================
+
+import asyncio
+from telethon.tl.types import MessageEntityCustomEmoji
 
 khofash_chats = set()
 
@@ -465,14 +468,11 @@ async def process_khofash_message(message):
     
     if message.entities:
         for entity in message.entities:
-            from telethon.tl.types import MessageEntityCustomEmoji
             if isinstance(entity, MessageEntityCustomEmoji):
-                doc_id = entity.document_id
-                if doc_id in BAT_ID_TO_REPLY_EMOJI:
-                    try:
-                        await message.reply(BAT_ID_TO_REPLY_EMOJI[doc_id])
-                    except Exception as err:
-                        print("[KHOFASH ERROR]", err)
+                emoji_char = BAT_ID_TO_REPLY_EMOJI.get(entity.document_id)
+                if emoji_char:
+                    # ارسال آنی بدون معطلی و انتظار برای پاسخ ربات اصلی
+                    asyncio.create_task(message.reply(emoji_char))
                     break
 
 @client.on(events.NewMessage())
@@ -482,7 +482,6 @@ async def khofash_new_message(event):
 @client.on(events.MessageEdited())
 async def khofash_edited_message(event):
     await process_khofash_message(event.message)
-
 
 # ============================================================
 # .UPTIME
