@@ -480,8 +480,9 @@ async def stop_fish_loop(event):
         await event.edit("🛑 اتوماسیون ماهی متوقف شد.")
     else:
         await event.edit("❌ هیچ اتوماسیونی فعالی وجود ندارد.")
+
 # ============================================================
-# .D — AUTO STEAL / AUTO HARVEST
+# .D — DEBUG AUTO STEAL
 # ============================================================
 
 steal_chats = set()
@@ -497,7 +498,6 @@ async def start_auto_steal(event):
 
     steal_chats.add(event.chat_id)
 
-    # حالت مخفی — خود دستور پاک شود
     try:
         await event.delete()
     except Exception:
@@ -509,60 +509,115 @@ async def try_auto_steal(message):
     if not message:
         return False
 
-    # متن پیام
-    message_text = (
+    text = (
         getattr(message, "raw_text", "")
         or ""
     )
 
-    # فقط پیام‌هایی که «فرصت برداشت» دارند
-    if "فرصت برداشت" not in message_text:
+    if "فرصت برداشت" not in text:
         return False
 
-    # اگر دکمه شیشه‌ای ندارد
+    print("======================================")
+    print("[STEAL] فرصت برداشت پیدا شد")
+    print("[STEAL] MESSAGE ID:", message.id)
+    print("[STEAL] TEXT:", repr(text))
+
     if not message.buttons:
+
+        print("[STEAL] ❌ هیچ button ای پیدا نشد")
+        print("======================================")
+
         return False
 
-    try:
+    print(
+        "[STEAL] BUTTON ROWS:",
+        len(message.buttons)
+    )
 
-        # اولین دکمه شیشه‌ای پیام
-        for row in message.buttons:
+    for row_index, row in enumerate(
+        message.buttons
+    ):
 
-            for button in row:
+        for column_index, button in enumerate(
+            row
+        ):
 
-                try:
+            try:
 
-                    await button.click()
+                raw_button = getattr(
+                    button,
+                    "button",
+                    None
+                )
+
+                print(
+                    "[STEAL] BUTTON:",
+                    row_index,
+                    column_index
+                )
+
+                print(
+                    "[STEAL] TEXT:",
+                    repr(
+                        getattr(
+                            button,
+                            "text",
+                            None
+                        )
+                    )
+                )
+
+                print(
+                    "[STEAL] TYPE:",
+                    type(raw_button).__name__
+                    if raw_button
+                    else type(button).__name__
+                )
+
+                if raw_button is not None:
 
                     print(
-                        "[STEAL] برداشت خودکار انجام شد."
+                        "[STEAL] DATA:",
+                        repr(
+                            getattr(
+                                raw_button,
+                                "data",
+                                None
+                            )
+                        )
                     )
 
-                    return True
+                print(
+                    "[STEAL] Trying click..."
+                )
 
-                except Exception as error:
+                # مستقیماً خود دکمه را کلیک می‌کنیم
+                result = await button.click()
 
-                    print(
-                        "[STEAL CLICK ERROR]",
-                        error
-                    )
+                print(
+                    "[STEAL] ✅ CLICK RESULT:",
+                    repr(result)
+                )
 
-                    # اگر یک دکمه نشد، دکمه بعدی را امتحان کن
-                    continue
+                print(
+                    "======================================"
+                )
 
-    except Exception as error:
+                return True
 
-        print(
-            "[STEAL ERROR]",
-            error
-        )
+            except Exception as error:
+
+                print(
+                    "[STEAL] ❌ CLICK ERROR:",
+                    repr(error)
+                )
+
+    print(
+        "======================================"
+    )
 
     return False
 
-
-# ============================================================
-# NEW MESSAGE
-# ============================================================
 
 @client.on(events.NewMessage())
 async def auto_steal_new_message(event):
@@ -574,10 +629,6 @@ async def auto_steal_new_message(event):
         event.message
     )
 
-
-# ============================================================
-# EDITED MESSAGE
-# ============================================================
 
 @client.on(events.MessageEdited())
 async def auto_steal_edited_message(event):
@@ -606,7 +657,6 @@ async def stop_auto_steal(event):
         event.chat_id
     )
 
-    # حالت مخفی
     try:
         await event.delete()
     except Exception:
