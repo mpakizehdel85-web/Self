@@ -482,185 +482,38 @@ async def stop_fish_loop(event):
         await event.edit("❌ هیچ اتوماسیونی فعالی وجود ندارد.")
 
 # ============================================================
-# .D — DEBUG AUTO STEAL
+# AUTO CLICKER - .d
 # ============================================================
 
 steal_chats = set()
 
-
-@client.on(
-    events.NewMessage(
-        outgoing=True,
-        pattern=r"^\.d$"
-    )
-)
-async def start_auto_steal(event):
-
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.d$"))
+async def d_on(event):
     steal_chats.add(event.chat_id)
-
-    try:
-        await event.delete()
-    except Exception:
-        pass
+    await event.delete()
 
 
-async def try_auto_steal(message):
-
-    if not message:
-        return False
-
-    text = (
-        getattr(message, "raw_text", "")
-        or ""
-    )
-
-    if "فرصت برداشت" not in text:
-        return False
-
-    print("======================================")
-    print("[STEAL] فرصت برداشت پیدا شد")
-    print("[STEAL] MESSAGE ID:", message.id)
-    print("[STEAL] TEXT:", repr(text))
-
-    if not message.buttons:
-
-        print("[STEAL] ❌ هیچ button ای پیدا نشد")
-        print("======================================")
-
-        return False
-
-    print(
-        "[STEAL] BUTTON ROWS:",
-        len(message.buttons)
-    )
-
-    for row_index, row in enumerate(
-        message.buttons
-    ):
-
-        for column_index, button in enumerate(
-            row
-        ):
-
-            try:
-
-                raw_button = getattr(
-                    button,
-                    "button",
-                    None
-                )
-
-                print(
-                    "[STEAL] BUTTON:",
-                    row_index,
-                    column_index
-                )
-
-                print(
-                    "[STEAL] TEXT:",
-                    repr(
-                        getattr(
-                            button,
-                            "text",
-                            None
-                        )
-                    )
-                )
-
-                print(
-                    "[STEAL] TYPE:",
-                    type(raw_button).__name__
-                    if raw_button
-                    else type(button).__name__
-                )
-
-                if raw_button is not None:
-
-                    print(
-                        "[STEAL] DATA:",
-                        repr(
-                            getattr(
-                                raw_button,
-                                "data",
-                                None
-                            )
-                        )
-                    )
-
-                print(
-                    "[STEAL] Trying click..."
-                )
-
-                # مستقیماً خود دکمه را کلیک می‌کنیم
-                result = await button.click()
-
-                print(
-                    "[STEAL] ✅ CLICK RESULT:",
-                    repr(result)
-                )
-
-                print(
-                    "======================================"
-                )
-
-                return True
-
-            except Exception as error:
-
-                print(
-                    "[STEAL] ❌ CLICK ERROR:",
-                    repr(error)
-                )
-
-    print(
-        "======================================"
-    )
-
-    return False
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopd$"))
+async def d_off(event):
+    steal_chats.discard(event.chat_id)
+    await event.delete()
 
 
 @client.on(events.NewMessage())
-async def auto_steal_new_message(event):
-
+async def auto_click(event):
     if event.chat_id not in steal_chats:
         return
 
-    await try_auto_steal(
-        event.message
-    )
-
-
-@client.on(events.MessageEdited())
-async def auto_steal_edited_message(event):
-
-    if event.chat_id not in steal_chats:
+    if "فرصت برداشت" not in event.raw_text:
         return
 
-    await try_auto_steal(
-        event.message
-    )
-
-
-# ============================================================
-# .STOPD
-# ============================================================
-
-@client.on(
-    events.NewMessage(
-        outgoing=True,
-        pattern=r"^\.stopd$"
-    )
-)
-async def stop_auto_steal(event):
-
-    steal_chats.discard(
-        event.chat_id
-    )
+    if not event.message.buttons:
+        return
 
     try:
-        await event.delete()
-    except Exception:
-        pass
+        await event.message.buttons[0][0].click()
+    except Exception as e:
+        print(f"[D] Click error: {e}", flush=True)
 # ============================================================
 # .AUTOMEO (AUTO MEO EVERY 5 MINUTES)
 # ============================================================
