@@ -482,38 +482,62 @@ async def stop_fish_loop(event):
         await event.edit("❌ هیچ اتوماسیونی فعالی وجود ندارد.")
 
 # ============================================================
-# AUTO CLICKER - .d
+# .D - AUTO STEAL
 # ============================================================
 
 steal_chats = set()
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.d$"))
-async def d_on(event):
+async def start_d(event):
     steal_chats.add(event.chat_id)
-    await event.delete()
+    try:
+        await event.delete()
+    except Exception:
+        pass
 
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopd$"))
-async def d_off(event):
+async def stop_d(event):
     steal_chats.discard(event.chat_id)
-    await event.delete()
+    try:
+        await event.delete()
+    except Exception:
+        pass
+
+
+async def check_d_message(message):
+    if message.chat_id not in steal_chats:
+        return
+
+    # عبارت «فرصت برداشت» باید داخل متن پیام وجود داشته باشد
+    if "فرصت برداشت" not in (message.raw_text or ""):
+        return
+
+    if not message.buttons:
+        return
+
+    # پیدا کردن دکمه‌ای که «بدزد» داخل متنش وجود دارد
+    for row in message.buttons:
+        for button in row:
+            text = getattr(button, "text", "") or ""
+
+            if "بدزد" in text:
+                try:
+                    await message.click(text=text)
+                except Exception:
+                    pass
+                return
 
 
 @client.on(events.NewMessage())
-async def auto_click(event):
-    if event.chat_id not in steal_chats:
-        return
+async def d_new_message(event):
+    await check_d_message(event.message)
 
-    if "فرصت برداشت" not in event.raw_text:
-        return
 
-    if not event.message.buttons:
-        return
-
-    try:
-        await event.message.buttons[0][0].click()
-    except Exception as e:
-        print(f"[D] Click error: {e}", flush=True)
+@client.on(events.MessageEdited())
+async def d_edited_message(event):
+    await check_d_message(event.message)
+    
 # ============================================================
 # .AUTOMEO (AUTO MEO EVERY 5 MINUTES)
 # ============================================================
