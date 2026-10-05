@@ -272,7 +272,68 @@ async def send_session(event):
         await event.edit("✅ TELEGRAM_SESSION در Saved Messages ارسال شد.")
     except Exception as error:
         await event.edit(f"❌ خطا:\n{error}")
+# ============================================================
+# .ROH - DELETE ALL MY MESSAGES
+# ============================================================
 
+roh_chats = set()
+
+
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.roh$"))
+async def start_roh(event):
+    chat_id = event.chat_id
+    roh_chats.add(chat_id)
+
+    # حذف خود دستور
+    try:
+        await event.delete()
+    except Exception:
+        pass
+
+    # حذف تمام پیام‌های قبلی خودم در این چت
+    try:
+        async for message in client.iter_messages(
+            chat_id,
+            from_user="me"
+        ):
+            try:
+                await message.delete()
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"[ROH] Error: {e}", flush=True)
+
+
+@client.on(events.NewMessage(outgoing=True))
+async def roh_new_message(event):
+    if event.chat_id not in roh_chats:
+        return
+
+    try:
+        await event.delete()
+    except Exception:
+        pass
+
+
+@client.on(events.MessageEdited(outgoing=True))
+async def roh_edited_message(event):
+    if event.chat_id not in roh_chats:
+        return
+
+    try:
+        await event.delete()
+    except Exception:
+        pass
+
+
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.stoproh$"))
+async def stop_roh(event):
+    roh_chats.discard(event.chat_id)
+
+    try:
+        await event.delete()
+    except Exception:
+        pass
 # ============================================================
 # TIME PARSER & .SET
 # ============================================================
@@ -485,7 +546,10 @@ async def stop_fish_loop(event):
 # .D - AUTO STEAL
 # ============================================================
 
+from telethon import functions
+
 steal_chats = set()
+
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.d$"))
 async def start_d(event):
@@ -509,24 +573,42 @@ async def check_d_message(message):
     if message.chat_id not in steal_chats:
         return
 
-    # عبارت «فرصت برداشت» باید داخل متن پیام وجود داشته باشد
+    # «فرصت برداشت» باید داخل متن پیام باشد
     if "فرصت برداشت" not in (message.raw_text or ""):
         return
 
     if not message.buttons:
         return
 
-    # پیدا کردن دکمه‌ای که «بدزد» داخل متنش وجود دارد
+    # پیدا کردن دکمه‌ای که «بدزد» داخل متنش است
     for row in message.buttons:
         for button in row:
-            text = getattr(button, "text", "") or ""
+            button_text = getattr(button, "text", "") or ""
 
-            if "بدزد" in text:
-                try:
-                    await message.click(text=text)
-                except Exception:
-                    pass
-                return
+            if "بدزد" not in button_text:
+                continue
+
+            try:
+                raw_button = getattr(button, "button", None)
+                data = getattr(raw_button, "data", None)
+
+                if not data:
+                    return
+
+                peer = await client.get_input_entity(message.chat_id)
+
+                await client(
+                    functions.messages.GetBotCallbackAnswerRequest(
+                        peer=peer,
+                        msg_id=message.id,
+                        data=data
+                    )
+                )
+
+            except Exception as e:
+                print(f"[D] Click error: {e}", flush=True)
+
+            return
 
 
 @client.on(events.NewMessage())
@@ -537,7 +619,6 @@ async def d_new_message(event):
 @client.on(events.MessageEdited())
 async def d_edited_message(event):
     await check_d_message(event.message)
-    
 # ============================================================
 # .AUTOMEO (AUTO MEO EVERY 5 MINUTES)
 # ============================================================
