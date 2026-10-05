@@ -546,10 +546,7 @@ async def stop_fish_loop(event):
 # .D - AUTO STEAL
 # ============================================================
 
-from telethon import functions
-
 steal_chats = set()
-
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.d$"))
 async def start_d(event):
@@ -570,59 +567,23 @@ async def stop_d(event):
 
 
 async def check_d_message(message):
-    if message.chat_id not in steal_chats:
+    if message.chat_id not in steal_chats or not message.buttons:
         return
 
-    # عبارت «فرصت برداشت» باید داخل متن پیام باشد
+    # فقط پیام‌هایی که «فرصت برداشت» داخل متنشان دارند
     if "فرصت برداشت" not in (message.raw_text or ""):
         return
 
-    if not message.buttons:
-        return
-
+    # پیدا کردن دکمه
     for row in message.buttons:
         for button in row:
+            text = getattr(button, "text", "") or ""
 
-            button_text = getattr(button, "text", "") or ""
-
-            if "بدزد" not in button_text:
-                continue
-
-            try:
-                raw = getattr(button, "button", None)
-
-                # در ساختار جدید Telegram، نوع واقعی دکمه
-                # داخل .type قرار دارد
-                button_type = getattr(raw, "type", None)
-
-                if button_type is None:
-                    return
-
-                # اگر دکمه Callback باشد
-                data = getattr(button_type, "data", None)
-
-                if data:
-                    peer = await client.get_input_entity(message.chat_id)
-
-                    await client(
-                        functions.messages.GetBotCallbackAnswerRequest(
-                            peer=peer,
-                            msg_id=message.id,
-                            data=data
-                        )
-                    )
-
-                    print("[D] CALLBACK CLICKED", flush=True)
-                    return
-
-                # اگر Callback data نداشت، از کلیک خود Telethon استفاده کن
-                await button.click()
-
-                print("[D] BUTTON CLICKED", flush=True)
-                return
-
-            except Exception as e:
-                print(f"[D] CLICK ERROR: {type(e).__name__}: {e}", flush=True)
+            if "بدزد" in text:
+                try:
+                    await message.click(text=text)
+                except Exception as e:
+                    print(f"[D] Click error: {e}", flush=True)
                 return
 
 
