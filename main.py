@@ -480,7 +480,167 @@ async def stop_fish_loop(event):
         await event.edit("🛑 اتوماسیون ماهی متوقف شد.")
     else:
         await event.edit("❌ هیچ اتوماسیونی فعالی وجود ندارد.")
+# ============================================================
+# .D — AUTO STEAL
+# ============================================================
 
+steal_chats = set()
+
+
+@client.on(
+    events.NewMessage(
+        outgoing=True,
+        pattern=r"^\.d$"
+    )
+)
+async def start_auto_steal(event):
+
+    chat_id = event.chat_id
+
+    # فعال کردن در همین چت
+    steal_chats.add(chat_id)
+
+    # حالت مخفی:
+    # خود دستور .d بلافاصله حذف شود
+    try:
+        await event.delete()
+    except Exception:
+        pass
+
+
+@client.on(events.NewMessage())
+async def auto_steal_new_message(event):
+
+    chat_id = event.chat_id
+
+    if chat_id not in steal_chats:
+        return
+
+    message = event.message
+
+    if not message.buttons:
+        return
+
+    try:
+
+        for row in message.buttons:
+
+            for button in row:
+
+                button_text = getattr(
+                    button,
+                    "text",
+                    ""
+                )
+
+                if (
+                    button_text
+                    and button_text.strip() == "بدزد"
+                ):
+
+                    # کلیک فوری
+                    await button.click()
+
+                    print(
+                        f"[STEAL] Clicked 'بدزد' "
+                        f"in chat {chat_id}"
+                    )
+
+                    return
+
+    except Exception as error:
+
+        print(
+            "[STEAL ERROR]",
+            error
+        )
+
+
+@client.on(events.MessageEdited())
+async def auto_steal_edited_message(event):
+
+    chat_id = event.chat_id
+
+    if chat_id not in steal_chats:
+        return
+
+    message = event.message
+
+    if not message.buttons:
+        return
+
+    try:
+
+        for row in message.buttons:
+
+            for button in row:
+
+                button_text = getattr(
+                    button,
+                    "text",
+                    ""
+                )
+
+                if (
+                    button_text
+                    and button_text.strip() == "بدزد"
+                ):
+
+                    await button.click()
+
+                    print(
+                        f"[STEAL] Clicked 'بدزد' "
+                        f"after edit in chat {chat_id}"
+                    )
+
+                    return
+
+    except Exception as error:
+
+        print(
+            "[STEAL ERROR]",
+            error
+        )
+
+
+# ============================================================
+# .STOPD
+# ============================================================
+
+@client.on(
+    events.NewMessage(
+        outgoing=True,
+        pattern=r"^\.stopd$"
+    )
+)
+async def stop_auto_steal(event):
+
+    steal_chats.discard(
+        event.chat_id
+    )
+
+    # مخفی
+    try:
+        await event.delete()
+    except Exception:
+        pass
+
+
+# ============================================================
+# FEATURE REGISTRATION
+# ============================================================
+
+register_feature(
+    ".d",
+    "دزدیدن خودکار با کلیک فوری روی دکمه «بدزد»",
+    "automation"
+)
+
+register_feature(
+    ".stopd",
+    "خاموش کردن دزد خودکار",
+    "automation"
+)
 # ============================================================
 # .AUTOMEO (AUTO MEO EVERY 5 MINUTES)
 # ============================================================
