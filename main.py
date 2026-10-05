@@ -481,7 +481,7 @@ async def stop_fish_loop(event):
     else:
         await event.edit("❌ هیچ اتوماسیونی فعالی وجود ندارد.")
 # ============================================================
-# .D — AUTO STEAL
+# .D — AUTO STEAL / AUTO HARVEST
 # ============================================================
 
 steal_chats = set()
@@ -495,58 +495,60 @@ steal_chats = set()
 )
 async def start_auto_steal(event):
 
-    chat_id = event.chat_id
+    steal_chats.add(event.chat_id)
 
-    # فعال کردن در همین چت
-    steal_chats.add(chat_id)
-
-    # حالت مخفی:
-    # خود دستور .d بلافاصله حذف شود
+    # حالت مخفی — خود دستور پاک شود
     try:
         await event.delete()
     except Exception:
         pass
 
 
-@client.on(events.NewMessage())
-async def auto_steal_new_message(event):
+async def try_auto_steal(message):
 
-    chat_id = event.chat_id
+    if not message:
+        return False
 
-    if chat_id not in steal_chats:
-        return
+    # متن پیام
+    message_text = (
+        getattr(message, "raw_text", "")
+        or ""
+    )
 
-    message = event.message
+    # فقط پیام‌هایی که «فرصت برداشت» دارند
+    if "فرصت برداشت" not in message_text:
+        return False
 
+    # اگر دکمه شیشه‌ای ندارد
     if not message.buttons:
-        return
+        return False
 
     try:
 
+        # اولین دکمه شیشه‌ای پیام
         for row in message.buttons:
 
             for button in row:
 
-                button_text = getattr(
-                    button,
-                    "text",
-                    ""
-                )
+                try:
 
-                if (
-                    button_text
-                    and button_text.strip() == "بدزد"
-                ):
-
-                    # کلیک فوری
                     await button.click()
 
                     print(
-                        f"[STEAL] Clicked 'بدزد' "
-                        f"in chat {chat_id}"
+                        "[STEAL] برداشت خودکار انجام شد."
                     )
 
-                    return
+                    return True
+
+                except Exception as error:
+
+                    print(
+                        "[STEAL CLICK ERROR]",
+                        error
+                    )
+
+                    # اگر یک دکمه نشد، دکمه بعدی را امتحان کن
+                    continue
 
     except Exception as error:
 
@@ -555,52 +557,37 @@ async def auto_steal_new_message(event):
             error
         )
 
+    return False
+
+
+# ============================================================
+# NEW MESSAGE
+# ============================================================
+
+@client.on(events.NewMessage())
+async def auto_steal_new_message(event):
+
+    if event.chat_id not in steal_chats:
+        return
+
+    await try_auto_steal(
+        event.message
+    )
+
+
+# ============================================================
+# EDITED MESSAGE
+# ============================================================
 
 @client.on(events.MessageEdited())
 async def auto_steal_edited_message(event):
 
-    chat_id = event.chat_id
-
-    if chat_id not in steal_chats:
+    if event.chat_id not in steal_chats:
         return
 
-    message = event.message
-
-    if not message.buttons:
-        return
-
-    try:
-
-        for row in message.buttons:
-
-            for button in row:
-
-                button_text = getattr(
-                    button,
-                    "text",
-                    ""
-                )
-
-                if (
-                    button_text
-                    and button_text.strip() == "بدزد"
-                ):
-
-                    await button.click()
-
-                    print(
-                        f"[STEAL] Clicked 'بدزد' "
-                        f"after edit in chat {chat_id}"
-                    )
-
-                    return
-
-    except Exception as error:
-
-        print(
-            "[STEAL ERROR]",
-            error
-        )
+    await try_auto_steal(
+        event.message
+    )
 
 
 # ============================================================
@@ -619,14 +606,11 @@ async def stop_auto_steal(event):
         event.chat_id
     )
 
-    # مخفی
+    # حالت مخفی
     try:
         await event.delete()
     except Exception:
         pass
-
-
-
 # ============================================================
 # .AUTOMEO (AUTO MEO EVERY 5 MINUTES)
 # ============================================================
