@@ -272,64 +272,7 @@ async def send_session(event):
         await event.edit("✅ TELEGRAM_SESSION در Saved Messages ارسال شد.")
     except Exception as error:
         await event.edit(f"❌ خطا:\n{error}")
-# ============================================================
-# .ROH - AUTO DELETE OWN MESSAGES
-# ============================================================
 
-roh_chats = set()
-
-
-@client.on(events.NewMessage(outgoing=True, pattern=r"^\.roh$"))
-async def start_roh(event):
-    chat_id = event.chat_id
-    roh_chats.add(chat_id)
-
-    # پاک کردن پیام‌های قبلی خودت
-    try:
-        async for message in client.iter_messages(
-            chat_id,
-            from_user="me"
-        ):
-            try:
-                await message.delete()
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-    # خود دستور هم پاک شود
-    try:
-        await event.delete()
-    except Exception:
-        pass
-
-
-@client.on(events.NewMessage(outgoing=True, pattern=r"^\.stoproh$"))
-async def stop_roh(event):
-    roh_chats.discard(event.chat_id)
-
-    try:
-        await event.delete()
-    except Exception:
-        pass
-
-
-@client.on(events.NewMessage(outgoing=True))
-async def roh_auto_delete(event):
-    if event.chat_id not in roh_chats:
-        return
-
-    # جلوگیری از دخالت در خاموش کردن حالت
-    if event.raw_text in (".roh", ".stoproh"):
-        return
-
-    # کمی صبر می‌کنیم تا پیام/عملیات ارسال کامل شود
-    await asyncio.sleep(0.15)
-
-    try:
-        await event.delete()
-    except Exception:
-        pass
 # ============================================================
 # TIME PARSER & .SET
 # ============================================================
@@ -474,50 +417,74 @@ fish_task_running = None
 
 async def run_fish_workflow(client, chat_id):
     try:
-        await client.send_message(chat_id, "ماهی")
-        await asyncio.sleep(4)
+        # ارسال ماهی
+        fish_message = await client.send_message(chat_id, "ماهی")
+
+        # یک ثانیه بعد خود پیام «ماهی» پاک شود
+        await asyncio.sleep(1)
+
+        try:
+            await fish_message.delete()
+        except Exception:
+            pass
+
+        # ادامه دقیقاً مثل قبل
+        await asyncio.sleep(3)
 
         async for message in client.iter_messages(chat_id, limit=3):
             if message.text and message.buttons:
                 text_content = message.text
+
                 if "افسانه‌ای" in text_content or "افسانه ای" in text_content:
                     target_text = "بندازش تو یخچال"
                 else:
                     target_text = "فروش ماهی"
 
                 clicked = False
+
                 for row in message.buttons:
                     for button in row:
                         if target_text in getattr(button, "text", ""):
                             await button.click()
                             clicked = True
                             break
+
                     if clicked:
                         break
+
                 break
+
     except Exception as error:
         print("[FISH ERROR]", error)
+
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.fish(?:\s|$)?"))
 async def start_fish_loop(event):
     global fish_task_running
-    
+
     cmd_text = event.raw_text.strip()
     match = re.search(r"^\.fish\s+(.+)$", cmd_text, re.IGNORECASE)
-    
+
     if not match:
-        await event.edit("❌ لطفا زمان را وارد کنید.\nمثال:\n`.fish 11m` یا `.fish 30s` یا `.fish 1h`")
+        await event.edit(
+            "❌ لطفا زمان را وارد کنید.\n"
+            "مثال:\n"
+            "`.fish 11m` یا `.fish 30s` یا `.fish 1h`"
+        )
         return
-        
+
     interval_str = match.group(1).strip()
     interval_seconds = parse_interval(interval_str)
-    
+
     if interval_seconds is None or interval_seconds <= 0:
         await event.edit("❌ فرمت زمان نامعتبر است.")
         return
 
     chat_id = event.chat_id
-    await event.edit(f"🎣 اتوماسیون ماهی فعال شد (هر {interval_str} یک‌بار).")
+
+    await event.edit(
+        f"🎣 اتوماسیون ماهی فعال شد (هر {interval_str} یک‌بار)."
+    )
 
     async def loop_job():
         while True:
@@ -526,18 +493,20 @@ async def start_fish_loop(event):
 
     if fish_task_running:
         fish_task_running.cancel()
+
     fish_task_running = asyncio.create_task(loop_job())
+
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopfish$"))
 async def stop_fish_loop(event):
     global fish_task_running
+
     if fish_task_running:
         fish_task_running.cancel()
         fish_task_running = None
         await event.edit("🛑 اتوماسیون ماهی متوقف شد.")
     else:
         await event.edit("❌ هیچ اتوماسیونی فعالی وجود ندارد.")
-
 # ============================================================
 # .D - AUTO STEAL
 # ============================================================
@@ -601,6 +570,7 @@ automeo_tasks = {}
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.automeo$"))
 async def start_automeo(event):
     chat_id = event.chat_id
+
     if chat_id in automeo_tasks:
         await event.edit("⚠️ ارسال خودکار meo از قبل در این چت فعال است.")
         return
@@ -610,24 +580,38 @@ async def start_automeo(event):
     async def meo_loop():
         while True:
             try:
-                await client.send_message(chat_id, "meo")
+                # ارسال meo
+                meo_message = await client.send_message(chat_id, "meo")
+
+                # یک ثانیه بعد فقط همین پیام حذف شود
+                await asyncio.sleep(1)
+
+                try:
+                    await meo_message.delete()
+                except Exception as delete_error:
+                    print("[AUTOMEO DELETE ERROR]", delete_error)
+
             except Exception as err:
                 print("[AUTOMEO ERROR]", err)
+
+            # ۵ دقیقه تا ارسال بعدی
             await asyncio.sleep(300)
 
     task = asyncio.create_task(meo_loop())
     automeo_tasks[chat_id] = task
 
+
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopautomeo$"))
 async def stop_automeo(event):
     chat_id = event.chat_id
+
     task = automeo_tasks.pop(chat_id, None)
+
     if task:
         task.cancel()
         await event.edit("🛑 ارسال خودکار meo در این چت متوقف شد.")
     else:
         await event.edit("❌ هیچ ارسال خودکاری در این چت فعال نیست.")
-
 # ============================================================
 # AUTO-REACTION FEATURE
 # ============================================================
