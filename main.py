@@ -543,82 +543,51 @@ async def stop_fish_loop(event):
         await event.edit("❌ هیچ اتوماسیونی فعالی وجود ندارد.")
 
 # ============================================================
-# .D - AUTO STEAL
+# .D DEBUG
 # ============================================================
 
-from telethon import functions
-
 steal_chats = set()
-
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.d$"))
 async def start_d(event):
     steal_chats.add(event.chat_id)
-    try:
-        await event.delete()
-    except Exception:
-        pass
+    await event.delete()
 
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopd$"))
 async def stop_d(event):
     steal_chats.discard(event.chat_id)
-    try:
-        await event.delete()
-    except Exception:
-        pass
-
-
-async def check_d_message(message):
-    if message.chat_id not in steal_chats:
-        return
-
-    # «فرصت برداشت» باید داخل متن پیام باشد
-    if "فرصت برداشت" not in (message.raw_text or ""):
-        return
-
-    if not message.buttons:
-        return
-
-    # پیدا کردن دکمه‌ای که «بدزد» داخل متنش است
-    for row in message.buttons:
-        for button in row:
-            button_text = getattr(button, "text", "") or ""
-
-            if "بدزد" not in button_text:
-                continue
-
-            try:
-                raw_button = getattr(button, "button", None)
-                data = getattr(raw_button, "data", None)
-
-                if not data:
-                    return
-
-                peer = await client.get_input_entity(message.chat_id)
-
-                await client(
-                    functions.messages.GetBotCallbackAnswerRequest(
-                        peer=peer,
-                        msg_id=message.id,
-                        data=data
-                    )
-                )
-
-            except Exception as e:
-                print(f"[D] Click error: {e}", flush=True)
-
-            return
+    await event.delete()
 
 
 @client.on(events.NewMessage())
-async def d_new_message(event):
-    await check_d_message(event.message)
+async def d_debug(event):
+    if event.chat_id not in steal_chats:
+        return
 
+    print("========== [D MESSAGE] ==========", flush=True)
+    print("CHAT:", event.chat_id, flush=True)
+    print("TEXT:", repr(event.raw_text), flush=True)
+    print("BUTTONS:", event.message.buttons, flush=True)
 
-@client.on(events.MessageEdited())
-async def d_edited_message(event):
-    await check_d_message(event.message)
+    if event.message.buttons:
+        for r, row in enumerate(event.message.buttons):
+            for c, button in enumerate(row):
+                print(
+                    "BUTTON:",
+                    r,
+                    c,
+                    "TEXT:",
+                    repr(getattr(button, "text", None)),
+                    "TYPE:",
+                    type(getattr(button, "button", None)).__name__,
+                    "DATA:",
+                    repr(getattr(getattr(button, "button", None), "data", None)),
+                    flush=True
+                )
+
+    print("=================================", flush=True)
+    
 # ============================================================
 # .AUTOMEO (AUTO MEO EVERY 5 MINUTES)
 # ============================================================
