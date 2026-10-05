@@ -273,7 +273,7 @@ async def send_session(event):
     except Exception as error:
         await event.edit(f"❌ خطا:\n{error}")
 # ============================================================
-# .ROH - DELETE ALL MY MESSAGES
+# .ROH - AUTO DELETE OWN MESSAGES
 # ============================================================
 
 roh_chats = set()
@@ -284,13 +284,7 @@ async def start_roh(event):
     chat_id = event.chat_id
     roh_chats.add(chat_id)
 
-    # حذف خود دستور
-    try:
-        await event.delete()
-    except Exception:
-        pass
-
-    # حذف تمام پیام‌های قبلی خودم در این چت
+    # پاک کردن پیام‌های قبلی خودت
     try:
         async for message in client.iter_messages(
             chat_id,
@@ -300,26 +294,10 @@ async def start_roh(event):
                 await message.delete()
             except Exception:
                 pass
-    except Exception as e:
-        print(f"[ROH] Error: {e}", flush=True)
-
-
-@client.on(events.NewMessage(outgoing=True))
-async def roh_new_message(event):
-    if event.chat_id not in roh_chats:
-        return
-
-    try:
-        await event.delete()
     except Exception:
         pass
 
-
-@client.on(events.MessageEdited(outgoing=True))
-async def roh_edited_message(event):
-    if event.chat_id not in roh_chats:
-        return
-
+    # خود دستور هم پاک شود
     try:
         await event.delete()
     except Exception:
@@ -329,6 +307,24 @@ async def roh_edited_message(event):
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.stoproh$"))
 async def stop_roh(event):
     roh_chats.discard(event.chat_id)
+
+    try:
+        await event.delete()
+    except Exception:
+        pass
+
+
+@client.on(events.NewMessage(outgoing=True))
+async def roh_auto_delete(event):
+    if event.chat_id not in roh_chats:
+        return
+
+    # جلوگیری از دخالت در خاموش کردن حالت
+    if event.raw_text in (".roh", ".stoproh"):
+        return
+
+    # کمی صبر می‌کنیم تا پیام/عملیات ارسال کامل شود
+    await asyncio.sleep(0.15)
 
     try:
         await event.delete()
