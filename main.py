@@ -543,7 +543,7 @@ async def stop_fish_loop(event):
         await event.edit("❌ هیچ اتوماسیونی فعالی وجود ندارد.")
 
 # ============================================================
-# .D DEBUG
+# .D - AUTO STEAL
 # ============================================================
 
 steal_chats = set()
@@ -551,43 +551,50 @@ steal_chats = set()
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.d$"))
 async def start_d(event):
     steal_chats.add(event.chat_id)
-    await event.delete()
+    try:
+        await event.delete()
+    except Exception:
+        pass
 
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopd$"))
 async def stop_d(event):
     steal_chats.discard(event.chat_id)
-    await event.delete()
+    try:
+        await event.delete()
+    except Exception:
+        pass
+
+
+async def check_d_message(message):
+    if message.chat_id not in steal_chats or not message.buttons:
+        return
+
+    # فقط پیام‌هایی که «فرصت برداشت» داخل متنشان دارند
+    if "فرصت برداشت" not in (message.raw_text or ""):
+        return
+
+    # پیدا کردن دکمه
+    for row in message.buttons:
+        for button in row:
+            text = getattr(button, "text", "") or ""
+
+            if "بدزد" in text:
+                try:
+                    await message.click(text=text)
+                except Exception as e:
+                    print(f"[D] Click error: {e}", flush=True)
+                return
 
 
 @client.on(events.NewMessage())
-async def d_debug(event):
-    if event.chat_id not in steal_chats:
-        return
+async def d_new_message(event):
+    await check_d_message(event.message)
 
-    print("========== [D MESSAGE] ==========", flush=True)
-    print("CHAT:", event.chat_id, flush=True)
-    print("TEXT:", repr(event.raw_text), flush=True)
-    print("BUTTONS:", event.message.buttons, flush=True)
 
-    if event.message.buttons:
-        for r, row in enumerate(event.message.buttons):
-            for c, button in enumerate(row):
-                print(
-                    "BUTTON:",
-                    r,
-                    c,
-                    "TEXT:",
-                    repr(getattr(button, "text", None)),
-                    "TYPE:",
-                    type(getattr(button, "button", None)).__name__,
-                    "DATA:",
-                    repr(getattr(getattr(button, "button", None), "data", None)),
-                    flush=True
-                )
-
-    print("=================================", flush=True)
-    
+@client.on(events.MessageEdited())
+async def d_edited_message(event):
+    await check_d_message(event.message)
 # ============================================================
 # .AUTOMEO (AUTO MEO EVERY 5 MINUTES)
 # ============================================================
