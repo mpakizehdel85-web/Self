@@ -274,6 +274,262 @@ async def send_session(event):
         await event.edit(f"❌ خطا:\n{error}")
 
 # ============================================================
+# CHIKO AUTOMATIONS
+# .chiko      -> کار، درس و پروفیت
+# .stopchiko  -> توقف هر سه
+# .jag        -> هر ساعت دو پیام
+# .stopjag    -> توقف
+# ============================================================
+
+import asyncio
+import random
+
+chiko_tasks = {}
+jag_tasks = {}
+
+
+async def send_and_delete(chat_id, text):
+    """ارسال پیام و حذف همان پیام پس از یک ثانیه."""
+    message = await client.send_message(chat_id, text)
+    await asyncio.sleep(1)
+
+    try:
+        await message.delete()
+    except Exception as error:
+        print("[AUTO DELETE ERROR]", error)
+
+    return message
+
+
+async def wait_for_panel(chat_id, reply_to_id, timeout=20):
+    """پیدا کردن پنل ربات که در پاسخ به پیام ما ارسال شده."""
+    for _ in range(timeout):
+        async for message in client.iter_messages(chat_id, limit=15):
+            if (
+                message.reply_to_msg_id == reply_to_id
+                and message.buttons
+            ):
+                return message
+
+        await asyncio.sleep(1)
+
+    print("[CHIKO] پنل پیدا نشد.")
+    return None
+
+
+async def click_random_button(message):
+    """انتخاب تصادفی یکی از دکمه‌های پنل."""
+    buttons = []
+
+    for row_index, row in enumerate(message.buttons or []):
+        for col_index, button in enumerate(row):
+            if getattr(button, "text", None):
+                buttons.append((row_index, col_index))
+
+    if not buttons:
+        return False
+
+    row_index, col_index = random.choice(buttons)
+
+    try:
+        await message.click(row_index, col_index)
+        print("[CHIKO] دکمه انتخاب شد.")
+        return True
+    except Exception as error:
+        print("[CHIKO BUTTON ERROR]", error)
+        return False
+
+
+# ------------------------------------------------------------
+# CHIKO KAR
+# هر 13 دقیقه
+# ------------------------------------------------------------
+
+async def run_chiko_kar(chat_id):
+    try:
+        sent = await client.send_message(chat_id, "چیکو کار")
+
+        # پنل را قبل از حذف پیام اصلی پیدا می‌کنیم
+        panel = await wait_for_panel(chat_id, sent.id)
+
+        # پیام خودمان یک ثانیه پس از ارسال حذف شود
+        await asyncio.sleep(max(0, 1))
+        try:
+            await sent.delete()
+        except Exception:
+            pass
+
+        if panel:
+            await click_random_button(panel)
+
+    except Exception as error:
+        print("[CHIKO KAR ERROR]", error)
+
+
+# ------------------------------------------------------------
+# CHIKO DARS
+# هر 7 دقیقه
+# ------------------------------------------------------------
+
+async def run_chiko_dars(chat_id):
+    try:
+        sent = await client.send_message(chat_id, "چیکو درس")
+
+        # پنل انتخاب درس
+        panel = await wait_for_panel(chat_id, sent.id)
+
+        await asyncio.sleep(1)
+        try:
+            await sent.delete()
+        except Exception:
+            pass
+
+        if not panel:
+            return
+
+        # انتخاب تصادفی یکی از چهار درس
+        await click_random_button(panel)
+
+        # منتظر پنل سؤال و جواب می‌مانیم
+        await asyncio.sleep(2)
+
+        async for message in client.iter_messages(chat_id, limit=10):
+            if (
+                message.id > panel.id
+                and message.buttons
+                and message.reply_to_msg_id == panel.id
+            ):
+                await click_random_button(message)
+                return
+
+        print("[CHIKO DARS] پنل جواب پیدا نشد.")
+
+    except Exception as error:
+        print("[CHIKO DARS ERROR]", error)
+
+
+# ------------------------------------------------------------
+# CHIKO PROFIT
+# هر 20 دقیقه
+# ------------------------------------------------------------
+
+async def run_chiko_profit(chat_id):
+    try:
+        await send_and_delete(chat_id, "پروفیت")
+    except Exception as error:
+        print("[CHIKO PROFIT ERROR]", error)
+
+
+# ------------------------------------------------------------
+# LOOP MANAGER
+# ------------------------------------------------------------
+
+async def chiko_loop(chat_id, key, interval, action):
+    try:
+        while True:
+            try:
+                await action(chat_id)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                print(f"[CHIKO {key.upper()} ERROR]", error)
+
+            await asyncio.sleep(interval)
+
+    except asyncio.CancelledError:
+        pass
+
+
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.chiko$"))
+async def start_chiko(event):
+    chat_id = event.chat_id
+
+    existing = chiko_tasks.get(chat_id, {})
+    if existing and any(not task.done() for task in existing.values()):
+        await event.edit("⚠️ اتوماسیون چیکو از قبل فعال است.")
+        return
+
+    chiko_tasks[chat_id] = {
+        "kar": asyncio.create_task(
+            chiko_loop(chat_id, "kar", 13 * 60, run_chiko_kar)
+        ),
+        "dars": asyncio.create_task(
+            chiko_loop(chat_id, "dars", 7 * 60, run_chiko_dars)
+        ),
+        "profit": asyncio.create_task(
+            chiko_loop(chat_id, "profit", 20 * 60, run_chiko_profit)
+        ),
+    }
+
+    await event.edit(
+        "✅ اتوماسیون چیکو فعال شد:\n"
+        "🔹 کار: هر ۱۳ دقیقه\n"
+        "🔹 درس: هر ۷ دقیقه\n"
+        "🔹 پروفیت: هر ۲۰ دقیقه\n\n"
+        "🧹 پیام‌های ارسالی پس از یک ثانیه حذف می‌شوند."
+    )
+
+
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopchiko$"))
+async def stop_chiko(event):
+    tasks = chiko_tasks.pop(event.chat_id, {})
+
+    if not tasks:
+        await event.edit("❌ اتوماسیون چیکو فعال نیست.")
+        return
+
+    for task in tasks.values():
+        task.cancel()
+
+    await event.edit("🛑 هر سه اتوماسیون چیکو متوقف شدند.")
+
+
+# ------------------------------------------------------------
+# JAG
+# هر ساعت دو پیام جداگانه
+# ------------------------------------------------------------
+
+async def jag_loop(chat_id):
+    try:
+        while True:
+            try:
+                await send_and_delete(chat_id, "جق")
+                await asyncio.sleep(2)
+                await send_and_delete(chat_id, "رابطه")
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                print("[JAG ERROR]", error)
+
+            await asyncio.sleep(60 * 60)
+
+    except asyncio.CancelledError:
+        pass
+
+
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.jag$"))
+async def start_jag(event):
+    chat_id = event.chat_id
+
+    if chat_id in jag_tasks and not jag_tasks[chat_id].done():
+        await event.edit("⚠️ اتوماسیون جق از قبل فعال است.")
+        return
+
+    jag_tasks[chat_id] = asyncio.create_task(jag_loop(chat_id))
+    await event.edit("✅ اتوماسیون فعال شد؛ هر ساعت دو پیام جداگانه ارسال می‌شود.")
+
+
+@client.on(events.NewMessage(outgoing=True, pattern=r"^\.stopjag$"))
+async def stop_jag(event):
+    task = jag_tasks.pop(event.chat_id, None)
+
+    if task:
+        task.cancel()
+        await event.edit("🛑 اتوماسیون جق متوقف شد.")
+    else:
+        await event.edit("❌ اتوماسیون جق فعال نیست.")
+
+# ============================================================
 # TIME PARSER & .SET
 # ============================================================
 
