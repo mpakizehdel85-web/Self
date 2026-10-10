@@ -371,15 +371,18 @@ async def run_chiko_kar(chat_id):
 # هر 7 دقیقه
 # ------------------------------------------------------------
 
+# ------------------------------------------------------------
+# CHIKO DARS
+# هر 7 دقیقه
+# ------------------------------------------------------------
+
 async def run_chiko_dars(chat_id):
     try:
-        # ارسال دستور درس
         sent = await client.send_message(chat_id, "چیکو درس")
 
         # پنل انتخاب درس
         panel = await wait_for_panel(chat_id, sent.id)
 
-        # حذف پیام خودمان بعد از یک ثانیه
         await asyncio.sleep(1)
         try:
             await sent.delete()
@@ -387,45 +390,29 @@ async def run_chiko_dars(chat_id):
             pass
 
         if not panel:
-            print("[CHIKO DARS] پنل انتخاب درس پیدا نشد.")
             return
 
-        # انتخاب تصادفی درس
+        # انتخاب تصادفی یکی از درس‌ها از پنل اول
         await click_random_button(panel)
 
-        # از اینجا پیام‌های جدید را بررسی می‌کنیم
-        # بدون اینکه نیاز به reply_to_msg_id داشته باشند
-        start_time = asyncio.get_running_loop().time()
-        selected_answer = False
+        # منتظر ماندن برای آپدیت شدن همان پیام (ویرایش شدن دکمه‌های شیشه‌ای)
+        for _ in range(10):
+            await asyncio.sleep(1.5)
+            try:
+                # گرفتن آخرین وضعیت همان پیام از سرور تلگرام تا دکمه‌های جدید خوانده شوند
+                updated_message = await client.get_messages(chat_id, ids=panel.id)
+                if updated_message and updated_message.buttons:
+                    # بررسی می‌کنیم که آیا دکمه‌ها تغییر کرده‌اند یا آماده‌ی پاسخ هستند
+                    if await click_random_button(updated_message):
+                        return
+            except Exception as e:
+                print("[CHIKO DARS EDIT ERROR]", e)
 
-        while asyncio.get_running_loop().time() - start_time < 20:
-            async for msg in client.iter_messages(chat_id, limit=15):
-                if msg.id <= panel.id:
-                    continue
-
-                if not msg.buttons:
-                    continue
-
-                # فقط پیام‌هایی که بعد از انتخاب درس آمده‌اند
-                # و دکمه دارند بررسی می‌شوند.
-                if msg.sender_id != panel.sender_id:
-                    continue
-
-                if await click_random_button(msg):
-                    selected_answer = True
-                    break
-
-            if selected_answer:
-                break
-
-            await asyncio.sleep(1)
-
-        if not selected_answer:
-            print("[CHIKO DARS] پنل جواب در مهلت مقرر پیدا نشد.")
+        print("[CHIKO DARS] پنل جواب پیدا نشد.")
 
     except Exception as error:
         print("[CHIKO DARS ERROR]", error)
-``
+
 # ------------------------------------------------------------
 # CHIKO PROFIT
 # هر 20 دقیقه
